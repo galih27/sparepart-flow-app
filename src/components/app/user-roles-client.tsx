@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Pencil } from 'lucide-react';
+import { FileUp, Pencil } from 'lucide-react';
 import type { User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
+import { useCollection, useFirestore } from '@/firebase';
+import { collection, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { usersMockData } from '@/lib/users-mock';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -43,15 +46,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '../ui/skeleton';
 
 const editSchema = z.object({
   role: z.enum(["Admin", "Teknisi", "Manager"]),
 });
 
-export default function UserRolesClient({ data: initialData }: { data: User[] }) {
+export default function UserRolesClient() {
   const { toast } = useToast();
-  const [data, setData] = useState<User[]>(initialData);
+  const firestore = useFirestore();
+  const usersQuery = useMemo(() => {
+    if (!firestore) return null;
+    return collection(firestore, 'users');
+  }, [firestore]);
+  
+  const { data, isLoading } = useCollection<User>(usersQuery);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const form = useForm<z.infer<typeof editSchema>>({
@@ -63,19 +75,50 @@ export default function UserRolesClient({ data: initialData }: { data: User[] })
     form.setValue("role", user.role);
     setIsModalOpen(true);
   };
+  
+  const handleImport = async () => {
+    if (!firestore) {
+      toast({ variant: "destructive", title: "Gagal", description: "Koneksi Firestore tidak tersedia." });
+      return;
+    }
+    if (data && data.length > 0) {
+      toast({ variant: "destructive", title: "Gagal", description: "Data pengguna sudah ada. Hapus data lama untuk mengimpor." });
+      return;
+    }
+    setIsImporting(true);
+    toast({ title: "Mengimpor Data", description: "Mohon tunggu, data pengguna sedang diimpor..." });
 
-  function onSubmit(values: z.infer<typeof editSchema>) {
-    if (!selectedUser) return;
+    try {
+      const batch = writeBatch(firestore);
+      usersMockData.forEach((user) => {
+        const docRef = doc(collection(firestore, "users"));
+        // We don't store password in firestore document
+        const { password, ...userData } = user;
+        batch.set(docRef, userData);
+      });
+      await batch.commit();
+      toast({ title: "Sukses", description: `${usersMockData.length} data pengguna berhasil diimpor.` });
+    } catch (error) {
+      console.error("Error importing data: ", error);
+      toast({ variant: "destructive", title: "Gagal Impor", description: "Terjadi kesalahan saat mengimpor data." });
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
-    setData(prevData =>
-      prevData.map(user =>
-        user.id_user === selectedUser.id_user
-          ? { ...user, role: values.role }
-          : user
-      )
-    );
-    toast({ title: "Sukses", description: `Role untuk ${selectedUser.nama_teknisi} berhasil diperbarui.` });
-    setIsModalOpen(false);
+  async function onSubmit(values: z.infer<typeof editSchema>) {
+    if (!selectedUser || !selectedUser.id || !firestore) return;
+
+    const userRef = doc(firestore, 'users', selectedUser.id);
+
+    try {
+      await updateDoc(userRef, { role: values.role });
+      toast({ title: "Sukses", description: `Role untuk ${selectedUser.nama_teknisi} berhasil diperbarui.` });
+      setIsModalOpen(false);
+    } catch (error) {
+      console.error("Error updating document: ", error);
+      toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui data role." });
+    }
   }
   
   const roleVariant = {
@@ -86,7 +129,11 @@ export default function UserRolesClient({ data: initialData }: { data: User[] })
 
   return (
     <>
-      <PageHeader title="User Role Management" />
+      <PageHeader title="User Role Management">
+        <Button variant="outline" onClick={handleImport} disabled={isImporting || (data && data.length > 0)}>
+          <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Import Users'}
+        </Button>
+      </PageHeader>
       <div className="p-4 md:p-6">
         <div className="border rounded-lg">
           <Table>
@@ -100,21 +147,39 @@ export default function UserRolesClient({ data: initialData }: { data: User[] })
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map(user => (
-                <TableRow key={user.id_user}>
-                  <TableCell className="font-medium">{user.nama_teknisi}</TableCell>
-                  <TableCell>{user.nik}</TableCell>
-                  <TableCell>{user.email}</TableCell>
-                  <TableCell>
-                    <Badge variant={roleVariant[user.role] || 'outline'}>{user.role}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(user)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
+              {isLoading ? (
+                Array.from({ length: 5 }).map((_, index) => (
+                  <TableRow key={index}>
+                    <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[200px]" /></TableCell>
+                    <TableCell><Skeleton className="h-6 w-[80px] rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-8 w-8" /></TableCell>
+                  </TableRow>
+                ))
+              ) : !data || data.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center h-24">
+                    Tidak ada data pengguna. Klik 'Import Users' untuk memulai.
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                data.map(user => (
+                  <TableRow key={user.id}>
+                    <TableCell className="font-medium">{user.nama_teknisi}</TableCell>
+                    <TableCell>{user.nik}</TableCell>
+                    <TableCell>{user.email}</TableCell>
+                    <TableCell>
+                      <Badge variant={roleVariant[user.role] || 'outline'}>{user.role}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="icon" onClick={() => handleEdit(user)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </div>
