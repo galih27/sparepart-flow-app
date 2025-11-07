@@ -166,7 +166,7 @@ export default function ReportStockClient() {
             }}
           />
         </div>
-        <Button variant="outline" onClick={handleImport} disabled={isImporting}>
+        <Button variant="outline" onClick={handleImport} disabled={isImporting || (initialData && initialData.length > 0)}>
           <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Import'}
         </Button>
         <Button><FileDown className="mr-2" /> Export</Button>
@@ -304,7 +304,7 @@ export default function ReportStockClient() {
                 </div>
                 <div className="grid grid-cols-[150px_1fr] items-center gap-4">
                   <span className="text-muted-foreground">Qty Rusak</span>
-                  <span>{selectedItem.qty_rusak} {selectedItem.satuan}</span>
+                  <span>{selectedSistem.qty_rusak} {selectedItem.satuan}</span>
                 </div>
                  <div className="grid grid-cols-[150px_1fr] items-center gap-4">
                   <span className="text-muted-foreground">Qty Real</span>
