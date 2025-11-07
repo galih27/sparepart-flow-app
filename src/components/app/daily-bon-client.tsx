@@ -1,10 +1,11 @@
+
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import * as z from "zod";
-import { Plus, Pencil } from 'lucide-react';
+import { Plus, Pencil, Eye } from 'lucide-react';
 import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore } from '@/firebase';
@@ -85,6 +86,7 @@ export default function DailyBonClient() {
   const [currentPage, setCurrentPage] = useState(1);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedBon, setSelectedBon] = useState<DailyBon | null>(null);
 
   const addForm = useForm<z.infer<typeof addSchema>>({
@@ -170,6 +172,11 @@ export default function DailyBonClient() {
       keterangan: bon.keterangan || '',
     });
     setIsEditModalOpen(true);
+  };
+
+  const handleView = (bon: DailyBon) => {
+    setSelectedBon(bon);
+    setIsViewModalOpen(true);
   };
   
   async function onEditSubmit(values: z.infer<typeof editSchema>) {
@@ -283,9 +290,15 @@ export default function DailyBonClient() {
               ) : (paginatedData.map(item => (
                 <TableRow key={item.id}>
                   <TableCell>
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
-                          <Pencil className="h-4 w-4" />
-                      </Button>
+                    {item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED' ? (
+                        <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+                            <Eye className="h-4 w-4" />
+                        </Button>
+                    ) : (
+                        <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+                            <Pencil className="h-4 w-4" />
+                        </Button>
+                    )}
                   </TableCell>
                   <TableCell className="font-medium">{item.part}</TableCell>
                   <TableCell>{item.deskripsi}</TableCell>
@@ -461,7 +474,7 @@ export default function DailyBonClient() {
                                 <FormItem>
                                     <FormLabel>No. TKL</FormLabel>
                                     <FormControl>
-                                        <Input placeholder="Isi No. TKL jika ada" {...field} />
+                                        <Input placeholder="Isi No. TKL jika ada" {...field} value={field.value ?? ''}/>
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
@@ -474,7 +487,7 @@ export default function DailyBonClient() {
                                 <FormItem>
                                     <FormLabel>Keterangan</FormLabel>
                                     <FormControl>
-                                        <Textarea placeholder="Keterangan opsional..." {...field} />
+                                        <Textarea placeholder="Keterangan opsional..." {...field} value={field.value ?? ''} />
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
@@ -491,6 +504,54 @@ export default function DailyBonClient() {
             </DialogContent>
         </Dialog>
       )}
+
+      {selectedBon && (
+        <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Detail Bon: {selectedBon.part}</DialogTitle>
+                    <DialogDescription>Deskripsi: {selectedBon.deskripsi}</DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4 text-sm">
+                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                        <span className="text-muted-foreground">Qty</span>
+                        <span>{selectedBon.qty_dailybon}</span>
+                    </div>
+                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                        <span className="text-muted-foreground">Harga</span>
+                        <span>{formatCurrency(selectedBon.harga)}</span>
+                    </div>
+                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                        <span className="text-muted-foreground">Status</span>
+                        <Badge variant={statusVariant[selectedBon.status_bon] || 'default'}>{selectedBon.status_bon}</Badge>
+                    </div>
+                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                        <span className="text-muted-foreground">Teknisi</span>
+                        <span>{selectedBon.teknisi}</span>
+                    </div>
+                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                        <span className="text-muted-foreground">Tanggal</span>
+                        <span>{selectedBon.tanggal_dailybon}</span>
+                    </div>
+                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                        <span className="text-muted-foreground">No. TKL</span>
+                        <span>{selectedBon.no_tkl || "-"}</span>
+                    </div>
+                     <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                        <span className="text-muted-foreground">Keterangan</span>
+                        <span>{selectedBon.keterangan || "-"}</span>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <DialogClose asChild>
+                        <Button variant="secondary">Tutup</Button>
+                    </DialogClose>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }
+
+    
