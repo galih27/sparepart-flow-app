@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
@@ -156,7 +157,7 @@ export default function BonPdsClient() {
   } as const;
 
   const isLoading = isLoadingData || isLoadingInventory || isLoadingAuth || isLoadingUser;
-  const isManager = currentUser?.role === 'Manager';
+  const canEdit = currentUser?.permissions.bonpds_edit;
 
   return (
     <>
@@ -175,7 +176,7 @@ export default function BonPdsClient() {
                 }}
               />
             </div>
-          {!isManager && (
+          {canEdit && (
             <Button onClick={() => setIsModalOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> Tambah
             </Button>

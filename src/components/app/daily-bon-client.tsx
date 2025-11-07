@@ -225,42 +225,41 @@ export default function DailyBonClient() {
   } as const;
 
   const isLoading = isLoadingData || isLoadingUsers || isLoadingInventory || isLoadingAuth || isLoadingUser;
-
-  const userRole = currentUser?.role;
-  const isAdmin = userRole === 'Admin';
-  const isManager = userRole === 'Manager';
-  const isTeknisi = userRole === 'Teknisi';
+  const permissions = currentUser?.permissions;
 
   const renderActionCell = (item: DailyBon) => {
-    if (isManager) return null; // Manager can't edit
-
-    const isFinalStatus = item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED';
-    
-    if (isAdmin) {
-      return (
-        <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
-          <Pencil className="h-4 w-4" />
-        </Button>
-      );
-    }
-
-    if (isTeknisi) {
-        if (isFinalStatus) {
+    if (!permissions?.dailybon_edit) {
         return (
             <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-            <Eye className="h-4 w-4" />
+                <Eye className="h-4 w-4" />
             </Button>
         );
-        }
-
+    }
+    
+    // Admin and users with edit permission can always edit
+    if (currentUser.role === 'Admin' || permissions.dailybon_edit) {
         return (
+            <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+                <Pencil className="h-4 w-4" />
+            </Button>
+        );
+    }
+
+    // Teknisi logic
+    const isFinalStatus = item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED';
+    if (isFinalStatus) {
+        return (
+            <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+                <Eye className="h-4 w-4" />
+            </Button>
+        );
+    }
+
+    return (
         <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
             <Pencil className="h-4 w-4" />
         </Button>
-        );
-    }
-    
-    return null;
+    );
   };
 
 
@@ -268,7 +267,7 @@ export default function DailyBonClient() {
     <>
       <PageHeader title="Daily Bon">
         <div className="flex items-center gap-2">
-           {!isTeknisi && (
+           {currentUser?.role !== 'Teknisi' && (
             <>
                 <Select value={filterTeknisi} onValueChange={(value) => {setFilterTeknisi(value === 'all' ? '' : value); setCurrentPage(1);}}>
                     <SelectTrigger className="w-[180px] bg-background">
@@ -297,7 +296,7 @@ export default function DailyBonClient() {
             </>
            )}
 
-          {!isManager && (
+          {permissions?.dailybon_edit && (
             <Button onClick={() => setIsAddModalOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> Tambah
             </Button>
@@ -310,7 +309,7 @@ export default function DailyBonClient() {
           <Table>
             <TableHeader>
               <TableRow>
-                {!isManager && <TableHead>Action</TableHead>}
+                <TableHead>Action</TableHead>
                 <TableHead>Part</TableHead>
                 <TableHead>Deskripsi</TableHead>
                 <TableHead>Qty</TableHead>
@@ -326,7 +325,7 @@ export default function DailyBonClient() {
               {isLoading ? (
                  Array.from({ length: 5 }).map((_, index) => (
                     <TableRow key={index}>
-                        {!isManager && <TableCell><Skeleton className="h-8 w-8" /></TableCell>}
+                        <TableCell><Skeleton className="h-8 w-8" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
@@ -340,13 +339,13 @@ export default function DailyBonClient() {
                  ))
               ) : paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={isManager ? 9 : 10} className="text-center h-24">
+                  <TableCell colSpan={10} className="text-center h-24">
                     Tidak ada data bon harian.
                   </TableCell>
                 </TableRow>
               ) : (paginatedData.map(item => (
                 <TableRow key={item.id}>
-                  {!isManager && <TableCell>{renderActionCell(item)}</TableCell>}
+                  <TableCell>{renderActionCell(item)}</TableCell>
                   <TableCell className="font-medium">{item.part}</TableCell>
                   <TableCell>{item.deskripsi}</TableCell>
                   <TableCell>{item.qty_dailybon}</TableCell>
@@ -445,8 +444,8 @@ export default function DailyBonClient() {
                     <Select 
                         onValueChange={field.onChange} 
                         defaultValue={field.value} 
-                        value={isTeknisi ? currentUser?.nama_teknisi : field.value}
-                        disabled={isTeknisi}
+                        value={currentUser?.role === 'Teknisi' ? currentUser?.nama_teknisi : field.value}
+                        disabled={currentUser?.role === 'Teknisi'}
                     >
                       <FormControl>
                         <SelectTrigger>

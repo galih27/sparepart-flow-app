@@ -1,3 +1,21 @@
+
+export type Permissions = {
+  dashboard_view: boolean;
+  dashboard_edit: boolean;
+  reportstock_view: boolean;
+  reportstock_edit: boolean;
+  bonpds_view: boolean;
+  bonpds_edit: boolean;
+  dailybon_view: boolean;
+  dailybon_edit: boolean;
+  userrole_view: boolean;
+  userrole_edit: boolean;
+  msk_view: boolean;
+  msk_edit: boolean;
+};
+
+export type Role = 'Admin' | 'Teknisi' | 'Manager' | 'Viewer';
+
 export type InventoryItem = {
   id?: string; // ID from Firestore
   part: string;
@@ -21,7 +39,8 @@ export type User = {
   nama_teknisi: string;
   email: string;
   password?: string;
-  role: 'Admin' | 'Teknisi' | 'Manager';
+  role: Role;
+  permissions: Permissions;
 };
 
 export type DailyBon = {

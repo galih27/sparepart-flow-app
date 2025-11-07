@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
@@ -149,7 +150,7 @@ export default function MskClient({ data: initialData }: { data: Msk[] }) {
     'CANCELED': 'destructive'
   } as const;
 
-  const isManager = currentUser?.role === 'Manager';
+  const canEdit = currentUser?.permissions.msk_edit;
 
 
   return (
@@ -169,7 +170,7 @@ export default function MskClient({ data: initialData }: { data: Msk[] }) {
                 }}
               />
             </div>
-          {!isManager && (
+          {canEdit && (
             <Button onClick={() => setIsModalOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" /> Tambah
             </Button>

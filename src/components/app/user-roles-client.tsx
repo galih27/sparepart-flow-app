@@ -1,11 +1,12 @@
+
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import * as z from "zod";
 import { Pencil, Plus } from 'lucide-react';
-import type { User } from '@/lib/definitions';
+import type { User, Role, Permissions } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCollection, useFirestore } from '@/firebase';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
@@ -33,6 +34,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -48,9 +50,27 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '../ui/skeleton';
 import { Input } from '../ui/input';
+import { Checkbox } from '../ui/checkbox';
+import { Separator } from '../ui/separator';
+
+const permissionsSchema = z.object({
+  dashboard_view: z.boolean(),
+  dashboard_edit: z.boolean(),
+  reportstock_view: z.boolean(),
+  reportstock_edit: z.boolean(),
+  bonpds_view: z.boolean(),
+  bonpds_edit: z.boolean(),
+  dailybon_view: z.boolean(),
+  dailybon_edit: z.boolean(),
+  userrole_view: z.boolean(),
+  userrole_edit: z.boolean(),
+  msk_view: z.boolean(),
+  msk_edit: z.boolean(),
+});
 
 const editSchema = z.object({
-  role: z.enum(["Admin", "Teknisi", "Manager"]),
+  role: z.enum(["Admin", "Teknisi", "Manager", "Viewer"]),
+  permissions: permissionsSchema,
 });
 
 const addSchema = z.object({
@@ -58,8 +78,59 @@ const addSchema = z.object({
   nik: z.string().min(1, "NIK wajib diisi"),
   email: z.string().email("Email tidak valid"),
   password: z.string().min(6, "Password minimal 6 karakter"),
-  role: z.enum(["Admin", "Teknisi", "Manager"]),
+  role: z.enum(["Admin", "Teknisi", "Manager", "Viewer"]),
 });
+
+const rolePermissions: Record<Role, Permissions> = {
+  Admin: {
+    dashboard_view: true, dashboard_edit: true,
+    reportstock_view: true, reportstock_edit: true,
+    bonpds_view: true, bonpds_edit: true,
+    dailybon_view: true, dailybon_edit: true,
+    userrole_view: true, userrole_edit: true,
+    msk_view: true, msk_edit: true,
+  },
+  Manager: {
+    dashboard_view: true, dashboard_edit: true,
+    reportstock_view: true, reportstock_edit: true,
+    bonpds_view: true, bonpds_edit: false,
+    dailybon_view: true, dailybon_edit: false,
+    userrole_view: true, userrole_edit: true,
+    msk_view: true, msk_edit: false,
+  },
+  Teknisi: {
+    dashboard_view: true, dashboard_edit: false,
+    reportstock_view: true, reportstock_edit: false,
+    bonpds_view: false, bonpds_edit: false,
+    dailybon_view: true, dailybon_edit: true,
+    userrole_view: true, userrole_edit: false,
+    msk_view: false, msk_edit: false,
+  },
+  Viewer: {
+    dashboard_view: true, dashboard_edit: false,
+    reportstock_view: false, reportstock_edit: false,
+    bonpds_view: false, bonpds_edit: false,
+    dailybon_view: false, dailybon_edit: false,
+    userrole_view: true, userrole_edit: false,
+    msk_view: false, msk_edit: false,
+  },
+};
+
+const permissionLabels: { id: keyof Permissions, label: string }[] = [
+    { id: 'dashboard_view', label: 'View Dashboard' },
+    { id: 'dashboard_edit', label: 'Edit Dashboard' },
+    { id: 'reportstock_view', label: 'View Report Stock' },
+    { id: 'reportstock_edit', label: 'Edit Report Stock' },
+    { id: 'dailybon_view', label: 'View Daily Bon' },
+    { id: 'dailybon_edit', label: 'Edit Daily Bon' },
+    { id: 'bonpds_view', label: 'View Bon PDS' },
+    { id: 'bonpds_edit', label: 'Edit Bon PDS' },
+    { id: 'msk_view', label: 'View MSK' },
+    { id: 'msk_edit', label: 'Edit MSK' },
+    { id: 'userrole_view', label: 'View User Role' },
+    { id: 'userrole_edit', label: 'Edit User Role' },
+];
+
 
 export default function UserRolesClient() {
   const { toast } = useToast();
@@ -92,9 +163,20 @@ export default function UserRolesClient() {
     }
   });
 
+  const selectedRole = editForm.watch('role');
+
+  useEffect(() => {
+    if (selectedRole) {
+      editForm.setValue('permissions', rolePermissions[selectedRole as Role]);
+    }
+  }, [selectedRole, editForm]);
+
   const handleEdit = (user: User) => {
     setSelectedUser(user);
-    editForm.setValue("role", user.role);
+    editForm.reset({
+      role: user.role,
+      permissions: user.permissions,
+    });
     setIsEditModalOpen(true);
   };
 
@@ -104,8 +186,11 @@ export default function UserRolesClient() {
     const userRef = doc(firestore, 'users', selectedUser.id);
 
     try {
-      await updateDoc(userRef, { role: values.role });
-      toast({ title: "Sukses", description: `Role untuk ${selectedUser.nama_teknisi} berhasil diperbarui.` });
+      await updateDoc(userRef, { 
+        role: values.role,
+        permissions: values.permissions,
+      });
+      toast({ title: "Sukses", description: `Role & hak akses untuk ${selectedUser.nama_teknisi} berhasil diperbarui.` });
       setIsEditModalOpen(false);
     } catch (error) {
       console.error("Error updating document: ", error);
@@ -133,6 +218,7 @@ export default function UserRolesClient() {
         nama_teknisi: values.nama_teknisi,
         email: values.email,
         role: values.role,
+        permissions: rolePermissions[values.role],
       };
 
       await setDoc(doc(firestore, "users", authUser.uid), newUser);
@@ -155,7 +241,8 @@ export default function UserRolesClient() {
   const roleVariant = {
     'Admin': 'destructive',
     'Manager': 'default',
-    'Teknisi': 'secondary'
+    'Teknisi': 'secondary',
+    'Viewer': 'outline'
   } as const;
 
   return (
@@ -219,19 +306,19 @@ export default function UserRolesClient() {
       {/* Edit User Modal */}
       {selectedUser && (
         <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>Edit Role: {selectedUser.nama_teknisi}</DialogTitle>
-              <DialogDescription>Pilih role baru untuk user ini.</DialogDescription>
+              <DialogDescription>Atur role dan hak akses spesifik untuk pengguna ini.</DialogDescription>
             </DialogHeader>
             <Form {...editForm}>
-              <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4 py-4">
+              <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-6 py-4">
                 <FormField
                   control={editForm.control}
                   name="role"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Role</FormLabel>
+                      <FormLabel>Role Preset</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -240,14 +327,59 @@ export default function UserRolesClient() {
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="Admin">Admin</SelectItem>
-                          <SelectItem value="Teknisi">Teknisi</SelectItem>
                           <SelectItem value="Manager">Manager</SelectItem>
+                          <SelectItem value="Teknisi">Teknisi</SelectItem>
+                          <SelectItem value="Viewer">Viewer</SelectItem>
                         </SelectContent>
                       </Select>
+                      <FormDescription>Memilih preset akan mengatur ulang hak akses di bawah.</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+                
+                <Separator />
+                
+                <div>
+                    <h3 className="mb-4 text-lg font-medium">Hak Akses Granular</h3>
+                    <div className="space-y-4">
+                        {Object.entries(
+                            permissionLabels.reduce((acc, p) => {
+                                const group = p.id.split('_')[0];
+                                if (!acc[group]) acc[group] = [];
+                                acc[group].push(p);
+                                return acc;
+                            }, {} as Record<string, typeof permissionLabels>)
+                        ).map(([group, perms]) => (
+                            <div key={group}>
+                                <h4 className="capitalize font-medium mb-2">{group.replace('userrole', 'user role').replace('reportstock', 'report stock')}</h4>
+                                <div className="grid grid-cols-2 gap-4 rounded-lg border p-4">
+                                {perms.map((permission) => (
+                                <FormField
+                                    key={permission.id}
+                                    control={editForm.control}
+                                    name={`permissions.${permission.id}`}
+                                    render={({ field }) => (
+                                    <FormItem className="flex flex-row items-center space-x-3 space-y-0">
+                                        <FormControl>
+                                        <Checkbox
+                                            checked={field.value}
+                                            onCheckedChange={field.onChange}
+                                        />
+                                        </FormControl>
+                                        <FormLabel className="font-normal">
+                                            {permission.label}
+                                        </FormLabel>
+                                    </FormItem>
+                                    )}
+                                />
+                                ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
                 <DialogFooter>
                   <DialogClose asChild>
                     <Button type="button" variant="secondary">Batal</Button>
@@ -297,6 +429,7 @@ export default function UserRolesClient() {
                           <SelectItem value="Admin">Admin</SelectItem>
                           <SelectItem value="Teknisi">Teknisi</SelectItem>
                           <SelectItem value="Manager">Manager</SelectItem>
+                          <SelectItem value="Viewer">Viewer</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />

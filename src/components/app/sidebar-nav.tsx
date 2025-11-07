@@ -1,3 +1,4 @@
+
 "use client";
 
 import { usePathname } from "next/navigation";
@@ -23,13 +24,13 @@ import {
 } from "lucide-react";
 
 const allMenuItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["Admin", "Manager", "Teknisi"] },
-  { href: "/report-stock", label: "Report Stock", icon: Warehouse, roles: ["Admin", "Manager"] },
-  { href: "/daily-bon", label: "Daily Bon", icon: Truck, roles: ["Admin", "Manager", "Teknisi"] },
-  { href: "/bon-pds", label: "Bon PDS", icon: ArrowRightLeft, roles: ["Admin", "Manager"] },
-  { href: "/msk", label: "MSK", icon: PackagePlus, roles: ["Admin", "Manager"] },
-  { href: "/user-roles", label: "User Role", icon: Users, roles: ["Admin"] },
-];
+  { href: "/", label: "Dashboard", icon: LayoutDashboard, permission: 'dashboard_view' },
+  { href: "/report-stock", label: "Report Stock", icon: Warehouse, permission: 'reportstock_view' },
+  { href: "/daily-bon", label: "Daily Bon", icon: Truck, permission: 'dailybon_view' },
+  { href: "/bon-pds", label: "Bon PDS", icon: ArrowRightLeft, permission: 'bonpds_view' },
+  { href: "/msk", label: "MSK", icon: PackagePlus, permission: 'msk_view' },
+  { href: "/user-roles", label: "User Role", icon: Users, permission: 'userrole_view' },
+] as const;
 
 function SidebarNavContent() {
   const pathname = usePathname();
@@ -43,13 +44,13 @@ function SidebarNavContent() {
 
   const { data: currentUser, isLoading: isLoadingRole } = useDoc<User>(userDocRef);
 
-  const userRole = currentUser?.role;
+  const permissions = currentUser?.permissions;
   const isLoading = isLoadingUser || isLoadingRole;
 
   const menuItems = useMemo(() => {
-    if (!userRole) return [];
-    return allMenuItems.filter(item => item.roles.includes(userRole));
-  }, [userRole]);
+    if (!permissions) return [];
+    return allMenuItems.filter(item => permissions[item.permission]);
+  }, [permissions]);
 
   return (
     <SidebarContent>

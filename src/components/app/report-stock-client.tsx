@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo, useRef } from 'react';
@@ -105,7 +106,11 @@ export default function ReportStockClient() {
   };
 
   const handleEdit = () => {
-    setIsEditing(true);
+    if (currentUser?.permissions.reportstock_edit) {
+      setIsEditing(true);
+    } else {
+      toast({ variant: 'destructive', title: 'Akses Ditolak', description: 'Anda tidak memiliki izin untuk mengedit data ini.' });
+    }
   };
 
   const handleImportClick = () => {
@@ -221,7 +226,7 @@ export default function ReportStockClient() {
   }
 
   const isLoading = isLoadingInventory || isLoadingAuth || isLoadingUser;
-  const isManager = currentUser?.role === 'Manager';
+  const canEdit = currentUser?.permissions.reportstock_edit;
 
   return (
     <>
@@ -240,7 +245,7 @@ export default function ReportStockClient() {
                 }}
               />
             </div>
-            {!isManager && (
+            {canEdit && (
                 <>
                     <Input
                         type="file"
@@ -406,7 +411,7 @@ export default function ReportStockClient() {
                   <DialogClose asChild>
                     <Button variant="secondary">Close</Button>                  
                   </DialogClose>
-                  {!isManager && <Button onClick={handleEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>}
+                  {canEdit && <Button onClick={handleEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>}
                 </DialogFooter>
               </div>
             )}
