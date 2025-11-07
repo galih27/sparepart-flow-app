@@ -219,13 +219,13 @@ export default function BonPdsClient() {
     }
   }
 
-  async function onEditSubmit(values: z.infer<typeof editSchema>) {
+async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
-  
+
     const bonRef = doc(firestore, 'bon_pds', selectedBon.id);
     const originalStatus = selectedBon.status_bonpds;
     const newStatus = values.status_bonpds;
-  
+
     try {
       await runTransaction(firestore, async (transaction) => {
         // 1. Update the Bon PDS document
@@ -234,38 +234,51 @@ export default function BonPdsClient() {
           no_transaksi: values.no_transaksi,
           keterangan: values.keterangan
         });
-  
-        // 2. Check if we need to update inventory
-        const shouldUpdateInventory = 
-          newStatus === 'RECEIVED' && originalStatus !== 'RECEIVED';
-  
-        if (shouldUpdateInventory) {
-          const inventoryCol = collection(firestore, 'inventory');
-          const q = query(inventoryCol, where("part", "==", selectedBon.part));
-          const inventorySnapshot = await getDocs(q);
-  
-          if (inventorySnapshot.empty) {
-            throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
-          }
-  
-          const inventoryDoc = inventorySnapshot.docs[0];
-          const inventoryRef = inventoryDoc.ref;
-          const currentInventory = inventoryDoc.data() as InventoryItem;
-  
-          const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_bonpds;
-          const newAvailableQty = currentInventory.available_qty - selectedBon.qty_bonpds;
-  
-          if (newQtyBaik < 0) {
-            throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
-          }
-  
-          transaction.update(inventoryRef, {
-            qty_baik: newQtyBaik,
-            available_qty: newAvailableQty
-          });
+
+        const isStockDeducted = originalStatus === 'RECEIVED';
+        const willStockBeDeducted = newStatus === 'RECEIVED';
+        
+        if (isStockDeducted === willStockBeDeducted) {
+          // No change in stock status, so no need to update inventory.
+          return;
         }
+
+        const inventoryCol = collection(firestore, 'inventory');
+        const q = query(inventoryCol, where("part", "==", selectedBon.part));
+        // Use transaction.get() inside a transaction
+        const inventorySnapshot = await transaction.get(q);
+
+        if (inventorySnapshot.empty) {
+          throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
+        }
+
+        const inventoryDoc = inventorySnapshot.docs[0];
+        const inventoryRef = inventoryDoc.ref;
+        const currentInventory = inventoryDoc.data() as InventoryItem;
+
+        let stockChange = 0;
+        if (willStockBeDeducted && !isStockDeducted) {
+            // Moving to RECEIVED from another state
+            stockChange = -selectedBon.qty_bonpds;
+        } else if (!willStockBeDeducted && isStockDeducted) {
+            // Moving from RECEIVED to another state (restocking)
+            stockChange = +selectedBon.qty_bonpds;
+        }
+
+        const newQtyBaik = currentInventory.qty_baik + stockChange;
+        
+        if (newQtyBaik < 0) {
+          throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
+        }
+        
+        const newAvailableQty = currentInventory.available_qty + stockChange;
+
+        transaction.update(inventoryRef, {
+          qty_baik: newQtyBaik,
+          available_qty: newAvailableQty
+        });
       });
-  
+
       toast({ title: "Sukses", description: "Status bon berhasil diperbarui dan stok telah disesuaikan." });
       setIsEditModalOpen(false);
       setSelectedBon(null);
@@ -273,7 +286,7 @@ export default function BonPdsClient() {
       console.error("Error updating document: ", error);
       toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal memperbarui status bon." });
     }
-  }
+}
 
 
   const formatCurrency = (value: number) => {
@@ -290,7 +303,8 @@ export default function BonPdsClient() {
   const permissions = currentUser?.permissions;
 
   const renderActionCell = (item: BonPDS) => {
-    const canEdit = permissions?.bonpds_edit && !(item.status_bonpds === 'RECEIVED' || item.status_bonpds === 'CANCELED');
+    const isReceivedOrCanceled = item.status_bonpds === 'RECEIVED' || item.status_bonpds === 'CANCELED';
+    const canEdit = permissions?.bonpds_edit && (currentUser?.role === 'Admin' || !isReceivedOrCanceled);
     const canDelete = permissions?.bonpds_delete;
 
     return (
@@ -298,7 +312,7 @@ export default function BonPdsClient() {
             <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
                 <Eye className="h-4 w-4" />
             </Button>
-            {(currentUser?.role === 'Admin' || canEdit) && (
+            {canEdit && (
                  <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
                     <Pencil className="h-4 w-4" />
                 </Button>
@@ -641,3 +655,5 @@ export default function BonPdsClient() {
     </>
   );
 }
+
+    

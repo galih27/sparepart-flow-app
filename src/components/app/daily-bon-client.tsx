@@ -231,55 +231,66 @@ export default function DailyBonClient() {
     }
   };
   
-  async function onEditSubmit(values: z.infer<typeof editSchema>) {
+async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
-  
+
     const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
     const originalStatus = selectedBon.status_bon;
     const newStatus = values.status_bon;
-  
+
     try {
       await runTransaction(firestore, async (transaction) => {
-        // 1. Update the Daily Bon document
+        // Update the Daily Bon document first
         transaction.update(bonRef, {
           status_bon: values.status_bon,
           no_tkl: values.no_tkl,
           keterangan: values.keterangan
         });
-  
-        // 2. Check if we need to update inventory
-        const shouldUpdateInventory = 
-          (newStatus === 'RECEIVED' || newStatus === 'KMP') && 
-          originalStatus !== 'RECEIVED' && 
-          originalStatus !== 'KMP';
-  
-        if (shouldUpdateInventory) {
-          const inventoryCol = collection(firestore, 'inventory');
-          const q = query(inventoryCol, where("part", "==", selectedBon.part));
-          const inventorySnapshot = await getDocs(q);
-  
-          if (inventorySnapshot.empty) {
-            throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
-          }
-  
-          const inventoryDoc = inventorySnapshot.docs[0];
-          const inventoryRef = inventoryDoc.ref;
-          const currentInventory = inventoryDoc.data() as InventoryItem;
-  
-          const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_dailybon;
-          const newAvailableQty = currentInventory.available_qty - selectedBon.qty_dailybon;
-  
-          if (newQtyBaik < 0) {
-            throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
-          }
-  
-          transaction.update(inventoryRef, {
-            qty_baik: newQtyBaik,
-            available_qty: newAvailableQty
-          });
+
+        const isStockDeducted = originalStatus === 'RECEIVED' || originalStatus === 'KMP';
+        const willStockBeDeducted = newStatus === 'RECEIVED' || newStatus === 'KMP';
+
+        if (isStockDeducted === willStockBeDeducted) {
+          // No change in stock status, so no need to update inventory.
+          return;
         }
+
+        const inventoryCol = collection(firestore, 'inventory');
+        const q = query(inventoryCol, where("part", "==", selectedBon.part));
+        // Use transaction.get() instead of getDocs() inside a transaction
+        const inventorySnapshot = await transaction.get(q);
+
+        if (inventorySnapshot.empty) {
+          throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
+        }
+
+        const inventoryDoc = inventorySnapshot.docs[0];
+        const inventoryRef = inventoryDoc.ref;
+        const currentInventory = inventoryDoc.data() as InventoryItem;
+
+        let stockChange = 0;
+        if (willStockBeDeducted && !isStockDeducted) {
+            // Moving to a stock-deducted state
+            stockChange = -selectedBon.qty_dailybon;
+        } else if (!willStockBeDeducted && isStockDeducted) {
+            // Moving away from a stock-deducted state (restocking)
+            stockChange = +selectedBon.qty_dailybon;
+        }
+        
+        const newQtyBaik = currentInventory.qty_baik + stockChange;
+
+        if (newQtyBaik < 0) {
+          throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
+        }
+        
+        const newAvailableQty = currentInventory.available_qty + stockChange;
+        
+        transaction.update(inventoryRef, {
+          qty_baik: newQtyBaik,
+          available_qty: newAvailableQty
+        });
       });
-  
+
       toast({ title: "Sukses", description: "Status bon berhasil diperbarui dan stok telah disesuaikan." });
       setIsEditModalOpen(false);
       setSelectedBon(null);
@@ -287,7 +298,7 @@ export default function DailyBonClient() {
       console.error("Error updating document: ", error);
       toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal memperbarui status bon." });
     }
-  }
+}
 
 
   const formatCurrency = (value: number) => {
@@ -305,7 +316,8 @@ export default function DailyBonClient() {
   const permissions = currentUser?.permissions;
 
   const renderActionCell = (item: DailyBon) => {
-    const canEdit = permissions?.dailybon_edit && !(item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED');
+    const isReceivedOrCanceled = item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED';
+    const canEdit = permissions?.dailybon_edit && (currentUser?.role === 'Admin' || !isReceivedOrCanceled);
     const canDelete = permissions?.dailybon_delete;
 
     return (
@@ -313,7 +325,7 @@ export default function DailyBonClient() {
             <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
                 <Eye className="h-4 w-4" />
             </Button>
-            {(currentUser?.role === 'Admin' || canEdit) && (
+            {canEdit && (
                  <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
                     <Pencil className="h-4 w-4" />
                 </Button>
@@ -688,3 +700,5 @@ export default function DailyBonClient() {
     </>
   );
 }
+
+    

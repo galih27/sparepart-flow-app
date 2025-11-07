@@ -158,6 +158,7 @@ export default function MskClient() {
             part: msk.part,
             deskripsi: msk.deskripsi,
             qty_msk: msk.qty_msk,
+            harga: inventory?.find(i => i.part === msk.part)?.total_harga || 0,
             site_msk: msk.site_msk,
             no_transaksi: msk.no_transaksi,
             status_msk: msk.status_msk,
@@ -192,84 +193,75 @@ export default function MskClient() {
     }
   };
   
-  async function onSubmit(values: z.infer<typeof formSchema>) {
+async function onSubmit(values: z.infer<typeof formSchema>) {
     if (!firestore) return;
     
     const isEditing = !!selectedMsk?.id;
-    const originalStatus = isEditing ? selectedMsk.status_msk : null;
-    const newStatus = values.status_msk;
 
     try {
-      await runTransaction(firestore, async (transaction) => {
-        let mskRef;
+        await runTransaction(firestore, async (transaction) => {
+            let mskRef;
+            const originalStatus = isEditing ? selectedMsk.status_msk : null;
+            const newStatus = values.status_msk;
 
-        if (isEditing) {
-          // Update existing MSK
-          mskRef = doc(firestore, 'msk', selectedMsk.id!);
-          transaction.update(mskRef, {
-            ...values,
-          });
-        } else {
-          // Add new MSK
-          const newMsk: Omit<Msk, 'id' | 'harga'> = {
-              part: values.part,
-              deskripsi: values.deskripsi,
-              qty_msk: values.qty_msk,
-              status_msk: 'BON', // Always start with BON
-              site_msk: values.site_msk,
-              tanggal_msk: new Date().toISOString().split('T')[0],
-              no_transaksi: values.no_transaksi,
-              keterangan: values.keterangan || '',
-          };
-          mskRef = doc(collection(firestore, 'msk'));
-          transaction.set(mskRef, newMsk);
-        }
+            if (isEditing) {
+                mskRef = doc(firestore, 'msk', selectedMsk.id!);
+                transaction.update(mskRef, { ...values });
+            } else {
+                const newMsk: Omit<Msk, 'id' | 'harga'> = {
+                    part: values.part,
+                    deskripsi: values.deskripsi,
+                    qty_msk: values.qty_msk,
+                    status_msk: values.status_msk,
+                    site_msk: values.site_msk,
+                    tanggal_msk: new Date().toISOString().split('T')[0],
+                    no_transaksi: values.no_transaksi,
+                    keterangan: values.keterangan || '',
+                };
+                mskRef = doc(collection(firestore, 'msk'));
+                transaction.set(mskRef, newMsk);
+            }
 
-        // Check if we need to update inventory
-        const shouldUpdateInventory = 
-          newStatus === 'RECEIVED' && originalStatus !== 'RECEIVED';
+            const isStockAdded = originalStatus === 'RECEIVED';
+            const willStockBeAdded = newStatus === 'RECEIVED';
 
-        if (shouldUpdateInventory) {
-          const inventoryCol = collection(firestore, 'inventory');
-          const q = query(inventoryCol, where("part", "==", values.part));
-          const inventorySnapshot = await getDocs(q);
+            if (isStockAdded !== willStockBeAdded) {
+                const inventoryCol = collection(firestore, 'inventory');
+                const q = query(inventoryCol, where("part", "==", values.part));
+                const inventorySnapshot = await transaction.get(q);
 
-          if (inventorySnapshot.empty) {
-            // If part does not exist, we can't add stock to it.
-            // A more robust solution might be to create it, but for now, we'll throw an error.
-            throw new Error(`Part ${values.part} tidak ditemukan di Report Stock.`);
-          }
+                if (inventorySnapshot.empty) {
+                    throw new Error(`Part ${values.part} tidak ditemukan di Report Stock.`);
+                }
 
-          const inventoryDoc = inventorySnapshot.docs[0];
-          const inventoryRef = inventoryDoc.ref;
-          const currentInventory = inventoryDoc.data() as InventoryItem;
+                const inventoryDoc = inventorySnapshot.docs[0];
+                const inventoryRef = inventoryDoc.ref;
+                const currentInventory = inventoryDoc.data() as InventoryItem;
 
-          const newQtyBaik = currentInventory.qty_baik + values.qty_msk;
-          const newAvailableQty = currentInventory.available_qty + values.qty_msk;
+                const stockChange = willStockBeAdded ? values.qty_msk : -values.qty_msk;
 
-          transaction.update(inventoryRef, {
-            qty_baik: newQtyBaik,
-            available_qty: newAvailableQty,
-            qty_real: newQtyBaik + currentInventory.qty_rusak, // Update qty_real as well
-          });
-        }
-      });
+                const newQtyBaik = currentInventory.qty_baik + stockChange;
+                const newAvailableQty = currentInventory.available_qty + stockChange;
 
-      if (isEditing) {
-        toast({ title: "Sukses", description: "Data MSK berhasil diperbarui dan stok telah disesuaikan." });
-        setIsEditModalOpen(false);
+                transaction.update(inventoryRef, {
+                    qty_baik: newQtyBaik,
+                    available_qty: newAvailableQty,
+                    qty_real: newQtyBaik + currentInventory.qty_rusak,
+                });
+            }
+        });
+
+        toast({ title: "Sukses", description: `Data MSK berhasil ${isEditing ? 'diperbarui' : 'ditambahkan'} dan stok telah disesuaikan.` });
+        if (isEditing) setIsEditModalOpen(false);
+        else setIsAddModalOpen(false);
         setSelectedMsk(null);
-      } else {
-        toast({ title: "Sukses", description: "Data MSK berhasil ditambahkan." });
-        setIsAddModalOpen(false);
-      }
-      form.reset();
+        form.reset();
 
     } catch (error: any) {
-      console.error("Error in transaction: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menyimpan data MSK." });
+        console.error("Error in transaction: ", error);
+        toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menyimpan data MSK." });
     }
-  }
+}
   
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
@@ -328,9 +320,9 @@ export default function MskClient() {
             render={({ field }) => (
                 <FormItem>
                     <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={!isEdit && !isAddModalOpen}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={!isEdit && isAddModalOpen}>
                         <FormControl>
-                            <SelectTrigger className={(!isEdit && !isAddModalOpen) ? "bg-muted" : ""}>
+                            <SelectTrigger className={(!isEdit && isAddModalOpen) ? "bg-muted" : ""}>
                                 <SelectValue placeholder="Pilih Status" />
                             </SelectTrigger>
                         </FormControl>
@@ -542,3 +534,5 @@ export default function MskClient() {
     </>
   );
 }
+
+    
