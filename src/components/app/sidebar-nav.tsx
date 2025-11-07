@@ -48,15 +48,15 @@ function SidebarNavContent() {
   const isLoading = isLoadingUser || isLoadingRole;
 
   const menuItems = useMemo(() => {
-    if (!permissions) return [];
+    if (isLoading || !permissions) return [];
     return allMenuItems.filter(item => permissions[item.permission]);
-  }, [permissions]);
+  }, [permissions, isLoading]);
 
   return (
     <SidebarContent>
       <SidebarMenu>
         {isLoading ? (
-           Array.from({ length: 5 }).map((_, index) => <SidebarMenuSkeleton key={index} showIcon />)
+           Array.from({ length: 6 }).map((_, index) => <SidebarMenuSkeleton key={index} showIcon />)
         ) : (
           menuItems.map((item) => (
             <SidebarMenuItem key={item.href}>
