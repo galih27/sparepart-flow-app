@@ -1,6 +1,5 @@
 export type InventoryItem = {
   id?: string; // ID from Firestore
-  id_inventory: string;
   part: string;
   deskripsi: string;
   harga_dpp: number;
