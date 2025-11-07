@@ -1,4 +1,4 @@
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
@@ -19,12 +19,16 @@ let auth: Auth;
 let firestore: Firestore;
 
 function initializeFirebase() {
-  if (getApps().length === 0) {
-    firebaseApp = initializeApp(firebaseConfig);
+  if (typeof window !== 'undefined') {
+    if (getApps().length === 0) {
+      firebaseApp = initializeApp(firebaseConfig);
+    } else {
+      firebaseApp = getApp();
+    }
     auth = getAuth(firebaseApp);
     firestore = getFirestore(firebaseApp);
   }
-
+  // @ts-ignore
   return { firebaseApp, auth, firestore };
 }
 
