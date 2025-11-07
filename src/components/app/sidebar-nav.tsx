@@ -44,8 +44,8 @@ function SidebarNavContent() {
 
   const { data: currentUser, isLoading: isLoadingRole } = useDoc<User>(userDocRef);
 
-  const permissions = currentUser?.permissions;
   const isLoading = isLoadingUser || isLoadingRole;
+  const permissions = currentUser?.permissions;
 
   const menuItems = useMemo(() => {
     if (isLoading || !permissions) return [];
