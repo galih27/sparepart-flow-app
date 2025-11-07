@@ -115,9 +115,8 @@ export default function UserRolesClient() {
     try {
       const batch = writeBatch(firestore);
       usersMockData.forEach((user) => {
-        // For mock data, we can create a new doc ref to get an ID
-        const docRef = doc(collection(firestore, "users"));
         const { password, ...userData } = user;
+        const docRef = doc(firestore, "users", user.id_user); 
         batch.set(docRef, userData);
       });
       await batch.commit();
@@ -356,5 +355,3 @@ export default function UserRolesClient() {
     </>
   );
 }
-
-    
