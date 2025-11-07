@@ -107,7 +107,7 @@ const rolePermissions: Record<Role, Permissions> = {
   Manager: {
     dashboard_view: true, dashboard_edit: true,
     reportstock_view: true, reportstock_edit: true, reportstock_delete: false,
-    bonpds_view: true, bonpds_edit: false, bonpds_delete: false,
+    bonpds_view: true, bonpds_edit: true, bonpds_delete: false,
     dailybon_view: true, dailybon_edit: false, dailybon_delete: false,
     userrole_view: true, userrole_edit: true, userrole_delete: false,
     msk_view: true, msk_edit: false,
