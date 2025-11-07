@@ -59,6 +59,7 @@ export type DailyBon = {
   tanggal_dailybon: string;
   no_tkl: string;
   keterangan: string;
+  stock_updated?: boolean; // Flag to track if stock has been updated
 };
 
 export type BonPDS = {
@@ -71,6 +72,7 @@ export type BonPDS = {
   tanggal_bonpds: string;
   no_transaksi: string;
   keterangan: string;
+  stock_updated?: boolean; // Flag to track if stock has been updated
 };
 
 export type Msk = {

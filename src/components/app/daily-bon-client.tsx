@@ -186,6 +186,7 @@ export default function DailyBonClient() {
         tanggal_dailybon: new Date().toISOString().split('T')[0],
         no_tkl: '',
         keterangan: values.keterangan || '',
+        stock_updated: false,
     };
     
     try {
@@ -238,70 +239,73 @@ export default function DailyBonClient() {
     }
   };
   
-  async function onEditSubmit(values: z.infer<typeof editSchema>) {
+async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
 
+    const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
     const newStatus = values.status_bon;
+    
+    // Logic to reduce stock if status is changed to RECEIVED or KMP
+    const shouldUpdateStock = (newStatus === 'RECEIVED' || newStatus === 'KMP') && !selectedBon.stock_updated;
 
-    // Find the corresponding inventory item before starting the transaction
-    const inventoryCol = collection(firestore, 'inventory');
-    const q = query(inventoryCol, where("part", "==", selectedBon.part));
-    const inventorySnapshot = await getDocs(q);
+    if (shouldUpdateStock) {
+        // Find the corresponding inventory item before starting the transaction
+        const inventoryCol = collection(firestore, 'inventory');
+        const q = query(inventoryCol, where("part", "==", selectedBon.part));
+        const inventorySnapshot = await getDocs(q);
 
-    if (inventorySnapshot.empty) {
-        toast({ variant: "destructive", title: "Gagal", description: `Part ${selectedBon.part} tidak ditemukan di Report Stock.` });
-        return;
-    }
-    const inventoryDoc = inventorySnapshot.docs[0];
-    const inventoryRef = inventoryDoc.ref;
-
-
-    try {
-      await runTransaction(firestore, async (transaction) => {
-        const bonRef = doc(firestore, 'daily_bon', selectedBon!.id!);
-        const currentBonDoc = await transaction.get(bonRef);
-        if (!currentBonDoc.exists()) {
-            throw new Error("Dokumen bon harian tidak ditemukan.");
+        if (inventorySnapshot.empty) {
+            toast({ variant: "destructive", title: "Gagal", description: `Part ${selectedBon.part} tidak ditemukan di Report Stock.` });
+            return;
         }
-        const originalStatus = currentBonDoc.data().status_bon;
-        
-        // 1. Update the Daily Bon document
-        transaction.update(bonRef, {
-          status_bon: newStatus,
-          no_tkl: values.no_tkl,
-          keterangan: values.keterangan
-        });
+        const inventoryDoc = inventorySnapshot.docs[0];
+        const inventoryRef = inventoryDoc.ref;
 
-        // 2. Check if stock needs to be deducted based on the specific scenario
-        const stockShouldBeDeducted = (newStatus === 'RECEIVED' || newStatus === 'KMP');
-        const stockWasDeducted = (originalStatus === 'RECEIVED' || originalStatus === 'KMP');
+        try {
+            await runTransaction(firestore, async (transaction) => {
+                const inventoryDoc = await transaction.get(inventoryRef);
+                if (!inventoryDoc.exists()) {
+                    throw new Error("Part tidak ditemukan di inventaris.");
+                }
 
-        if (stockShouldBeDeducted && !stockWasDeducted) {
-            const currentInventoryDoc = await transaction.get(inventoryRef);
-            if (!currentInventoryDoc.exists()) {
-                throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock saat transaksi.`);
-            }
-            const currentInventory = currentInventoryDoc.data() as InventoryItem;
-            
-            const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_dailybon;
-            if (newQtyBaik < 0) {
-                throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
-            }
-            const newAvailableQty = currentInventory.available_qty - selectedBon.qty_dailybon;
-            
-            transaction.update(inventoryRef, {
-                qty_baik: newQtyBaik,
-                available_qty: newAvailableQty,
+                const currentInventory = inventoryDoc.data() as InventoryItem;
+                const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_dailybon;
+                if (newQtyBaik < 0) {
+                    throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
+                }
+                const newAvailableQty = currentInventory.available_qty - selectedBon.qty_dailybon;
+
+                // Update inventory
+                transaction.update(inventoryRef, {
+                    qty_baik: newQtyBaik,
+                    available_qty: newAvailableQty,
+                });
+
+                // Update the bon with new status and flag
+                transaction.update(bonRef, {
+                    ...values,
+                    stock_updated: true,
+                });
             });
-        }
-      });
 
-      toast({ title: "Sukses", description: "Status bon berhasil diperbarui dan stok telah disesuaikan." });
-      setIsEditModalOpen(false);
-      setSelectedBon(null);
-    } catch (error: any) {
-      console.error("Error updating document: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal memperbarui status bon." });
+            toast({ title: "Sukses", description: "Status bon diperbarui dan stok telah dikurangi." });
+            setIsEditModalOpen(false);
+            setSelectedBon(null);
+        } catch (error: any) {
+            console.error("Gagal memperbarui transaksi: ", error);
+            toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal memperbarui status bon." });
+        }
+    } else {
+        // Just update the bon without touching the stock
+        try {
+            await updateDoc(bonRef, values);
+            toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
+            setIsEditModalOpen(false);
+            setSelectedBon(null);
+        } catch (error: any) {
+            console.error("Gagal memperbarui dokumen: ", error);
+            toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui status bon." });
+        }
     }
 }
 

@@ -208,6 +208,7 @@ export default function BonPdsClient() {
         tanggal_bonpds: new Date().toISOString().split('T')[0],
         no_transaksi: `TRX-PDS-${Date.now()}`,
         keterangan: values.keterangan || '',
+        stock_updated: false,
     };
     
     try {
@@ -224,66 +225,65 @@ export default function BonPdsClient() {
 async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
 
+    const bonRef = doc(firestore, 'bon_pds', selectedBon.id);
     const newStatus = values.status_bonpds;
 
-    // Find the corresponding inventory item before starting the transaction
-    const inventoryCol = collection(firestore, 'inventory');
-    const q = query(inventoryCol, where("part", "==", selectedBon.part));
-    const inventorySnapshot = await getDocs(q);
+    const shouldUpdateStock = newStatus === 'RECEIVED' && !selectedBon.stock_updated;
 
-    if (inventorySnapshot.empty) {
-        toast({ variant: "destructive", title: "Gagal", description: `Part ${selectedBon.part} tidak ditemukan di Report Stock.` });
-        return;
-    }
-    const inventoryDoc = inventorySnapshot.docs[0];
-    const inventoryRef = inventoryDoc.ref;
+    if (shouldUpdateStock) {
+        const inventoryCol = collection(firestore, 'inventory');
+        const q = query(inventoryCol, where("part", "==", selectedBon.part));
+        const inventorySnapshot = await getDocs(q);
 
-    try {
-      await runTransaction(firestore, async (transaction) => {
-        const bonRef = doc(firestore, 'bon_pds', selectedBon!.id!);
-        const currentBonDoc = await transaction.get(bonRef);
-         if (!currentBonDoc.exists()) {
-            throw new Error("Dokumen Bon PDS tidak ditemukan.");
+        if (inventorySnapshot.empty) {
+            toast({ variant: "destructive", title: "Gagal", description: `Part ${selectedBon.part} tidak ditemukan di Report Stock.` });
+            return;
         }
-        const originalStatus = currentBonDoc.data().status_bonpds;
-        
-        // 1. Update the Bon PDS document
-        transaction.update(bonRef, {
-          status_bonpds: newStatus,
-          no_transaksi: values.no_transaksi,
-          keterangan: values.keterangan
-        });
+        const inventoryDocRef = inventorySnapshot.docs[0].ref;
 
-        // 2. Check if stock needs to be deducted
-        const stockShouldBeDeducted = newStatus === 'RECEIVED';
-        const stockWasNotDeducted = originalStatus !== 'RECEIVED';
+        try {
+            await runTransaction(firestore, async (transaction) => {
+                const inventoryDoc = await transaction.get(inventoryDocRef);
+                if (!inventoryDoc.exists()) {
+                    throw new Error("Part tidak ditemukan di inventaris.");
+                }
 
-        if (stockShouldBeDeducted && stockWasNotDeducted) {
-            const currentInventoryDoc = await transaction.get(inventoryRef);
-            if (!currentInventoryDoc.exists()) {
-                throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock saat transaksi.`);
-            }
-            const currentInventory = currentInventoryDoc.data() as InventoryItem;
+                const currentInventory = inventoryDoc.data() as InventoryItem;
+                const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_bonpds;
+                if (newQtyBaik < 0) {
+                    throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
+                }
+                const newAvailableQty = currentInventory.available_qty - selectedBon.qty_bonpds;
 
-            const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_bonpds;
-            if (newQtyBaik < 0) {
-                throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
-            }
-            const newAvailableQty = currentInventory.available_qty - selectedBon.qty_bonpds;
-
-            transaction.update(inventoryRef, {
-                qty_baik: newQtyBaik,
-                available_qty: newAvailableQty
+                transaction.update(inventoryDocRef, {
+                    qty_baik: newQtyBaik,
+                    available_qty: newAvailableQty,
+                });
+                
+                transaction.update(bonRef, {
+                    ...values,
+                    stock_updated: true,
+                });
             });
-        }
-      });
 
-      toast({ title: "Sukses", description: "Status bon berhasil diperbarui dan stok telah disesuaikan." });
-      setIsEditModalOpen(false);
-      setSelectedBon(null);
-    } catch (error: any) {
-      console.error("Error updating document: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal memperbarui status bon." });
+            toast({ title: "Sukses", description: "Status bon diperbarui dan stok telah dikurangi." });
+            setIsEditModalOpen(false);
+            setSelectedBon(null);
+
+        } catch (error: any) {
+            console.error("Gagal memperbarui transaksi: ", error);
+            toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal memperbarui status bon." });
+        }
+    } else {
+        try {
+            await updateDoc(bonRef, values);
+            toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
+            setIsEditModalOpen(false);
+            setSelectedBon(null);
+        } catch (error: any) {
+            console.error("Gagal memperbarui dokumen: ", error);
+            toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui status bon." });
+        }
     }
 }
 
