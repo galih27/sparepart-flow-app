@@ -3,14 +3,14 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm, Controller } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Pencil, Plus } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import type { User, Role, Permissions } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCollection, useFirestore } from '@/firebase';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { collection, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, deleteUser } from 'firebase/auth';
+import { collection, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,16 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -58,12 +68,16 @@ const permissionsSchema = z.object({
   dashboard_edit: z.boolean(),
   reportstock_view: z.boolean(),
   reportstock_edit: z.boolean(),
+  reportstock_delete: z.boolean(),
   bonpds_view: z.boolean(),
   bonpds_edit: z.boolean(),
+  bonpds_delete: z.boolean(),
   dailybon_view: z.boolean(),
   dailybon_edit: z.boolean(),
+  dailybon_delete: z.boolean(),
   userrole_view: z.boolean(),
   userrole_edit: z.boolean(),
+  userrole_delete: z.boolean(),
   msk_view: z.boolean(),
   msk_edit: z.boolean(),
 });
@@ -84,34 +98,34 @@ const addSchema = z.object({
 const rolePermissions: Record<Role, Permissions> = {
   Admin: {
     dashboard_view: true, dashboard_edit: true,
-    reportstock_view: true, reportstock_edit: true,
-    bonpds_view: true, bonpds_edit: true,
-    dailybon_view: true, dailybon_edit: true,
-    userrole_view: true, userrole_edit: true,
+    reportstock_view: true, reportstock_edit: true, reportstock_delete: true,
+    bonpds_view: true, bonpds_edit: true, bonpds_delete: true,
+    dailybon_view: true, dailybon_edit: true, dailybon_delete: true,
+    userrole_view: true, userrole_edit: true, userrole_delete: true,
     msk_view: true, msk_edit: true,
   },
   Manager: {
     dashboard_view: true, dashboard_edit: true,
-    reportstock_view: true, reportstock_edit: true,
-    bonpds_view: true, bonpds_edit: false,
-    dailybon_view: true, dailybon_edit: false,
-    userrole_view: true, userrole_edit: true,
+    reportstock_view: true, reportstock_edit: true, reportstock_delete: false,
+    bonpds_view: true, bonpds_edit: false, bonpds_delete: false,
+    dailybon_view: true, dailybon_edit: false, dailybon_delete: false,
+    userrole_view: true, userrole_edit: true, userrole_delete: false,
     msk_view: true, msk_edit: false,
   },
   Teknisi: {
     dashboard_view: true, dashboard_edit: false,
-    reportstock_view: true, reportstock_edit: false,
-    bonpds_view: false, bonpds_edit: false,
-    dailybon_view: true, dailybon_edit: true,
-    userrole_view: true, userrole_edit: false,
+    reportstock_view: true, reportstock_edit: false, reportstock_delete: false,
+    bonpds_view: false, bonpds_edit: false, bonpds_delete: false,
+    dailybon_view: true, dailybon_edit: true, dailybon_delete: false,
+    userrole_view: true, userrole_edit: false, userrole_delete: false,
     msk_view: false, msk_edit: false,
   },
   Viewer: {
     dashboard_view: true, dashboard_edit: false,
-    reportstock_view: false, reportstock_edit: false,
-    bonpds_view: false, bonpds_edit: false,
-    dailybon_view: false, dailybon_edit: false,
-    userrole_view: true, userrole_edit: false,
+    reportstock_view: false, reportstock_edit: false, reportstock_delete: false,
+    bonpds_view: false, bonpds_edit: false, bonpds_delete: false,
+    dailybon_view: false, dailybon_edit: false, dailybon_delete: false,
+    userrole_view: true, userrole_edit: false, userrole_delete: false,
     msk_view: false, msk_edit: false,
   },
 };
@@ -121,14 +135,18 @@ const permissionLabels: { id: keyof Permissions, label: string }[] = [
     { id: 'dashboard_edit', label: 'Edit Dashboard' },
     { id: 'reportstock_view', label: 'View Report Stock' },
     { id: 'reportstock_edit', label: 'Edit Report Stock' },
+    { id: 'reportstock_delete', label: 'Delete Report Stock' },
     { id: 'dailybon_view', label: 'View Daily Bon' },
     { id: 'dailybon_edit', label: 'Edit Daily Bon' },
+    { id: 'dailybon_delete', label: 'Delete Daily Bon' },
     { id: 'bonpds_view', label: 'View Bon PDS' },
     { id: 'bonpds_edit', label: 'Edit Bon PDS' },
+    { id: 'bonpds_delete', label: 'Delete Bon PDS' },
     { id: 'msk_view', label: 'View MSK' },
     { id: 'msk_edit', label: 'Edit MSK' },
     { id: 'userrole_view', label: 'View User Role' },
     { id: 'userrole_edit', label: 'Edit User Role' },
+    { id: 'userrole_delete', label: 'Delete User Role' },
 ];
 
 
@@ -145,7 +163,8 @@ export default function UserRolesClient() {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isAddingUser, setIsAddingUser] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isAddUser, setIsAddUser] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const editForm = useForm<z.infer<typeof editSchema>>({
@@ -179,6 +198,32 @@ export default function UserRolesClient() {
     });
     setIsEditModalOpen(true);
   };
+  
+  const handleDelete = (user: User) => {
+    setSelectedUser(user);
+    setIsDeleting(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!selectedUser || !selectedUser.id || !firestore) return;
+
+    try {
+      // NOTE: Deleting a user from Firebase Auth is a privileged operation
+      // and should ideally be done from a backend server with Admin SDK.
+      // The following `deleteUser` from client-side will likely fail
+      // unless the user has recently signed in.
+      // For this app, we will just delete the Firestore record.
+      await deleteDoc(doc(firestore, 'users', selectedUser.id));
+      
+      toast({ title: "Sukses", description: `Pengguna ${selectedUser.nama_teknisi} telah dihapus.` });
+    } catch (error: any) {
+      console.error("Error deleting user: ", error);
+      toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus pengguna." });
+    } finally {
+      setIsDeleting(false);
+      setSelectedUser(null);
+    }
+  };
 
   async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!selectedUser || !selectedUser.id || !firestore) return;
@@ -204,7 +249,7 @@ export default function UserRolesClient() {
       return;
     }
     
-    setIsAddingUser(true);
+    setIsAddUser(true);
 
     try {
       // 1. Create user in Firebase Auth
@@ -227,14 +272,15 @@ export default function UserRolesClient() {
       setIsAddModalOpen(false);
       addForm.reset();
 
-    } catch (error: any) {
+    } catch (error: any)
+{
       console.error("Error adding user:", error);
       const errorMessage = error.code === 'auth/email-already-in-use' 
         ? "Email ini sudah terdaftar."
         : "Gagal menambahkan pengguna baru. Periksa konsol untuk detailnya.";
       toast({ variant: "destructive", title: "Gagal", description: errorMessage });
     } finally {
-        setIsAddingUser(false);
+        setIsAddUser(false);
     }
   }
   
@@ -261,7 +307,7 @@ export default function UserRolesClient() {
                 <TableHead>NIK</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
-                <TableHead>Action</TableHead>
+                <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -272,7 +318,7 @@ export default function UserRolesClient() {
                     <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[200px]" /></TableCell>
                     <TableCell><Skeleton className="h-6 w-[80px] rounded-full" /></TableCell>
-                    <TableCell><Skeleton className="h-8 w-8" /></TableCell>
+                    <TableCell><div className="flex justify-end gap-2"><Skeleton className="h-8 w-8" /><Skeleton className="h-8 w-8" /></div></TableCell>
                   </TableRow>
                 ))
               ) : !data || data.length === 0 ? (
@@ -290,9 +336,12 @@ export default function UserRolesClient() {
                     <TableCell>
                       <Badge variant={roleVariant[user.role] || 'outline'}>{user.role}</Badge>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-right">
                       <Button variant="ghost" size="icon" onClick={() => handleEdit(user)}>
                         <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(user)} className="text-destructive hover:text-destructive">
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -303,6 +352,22 @@ export default function UserRolesClient() {
         </div>
       </div>
 
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tindakan ini akan menghapus pengguna atas nama <strong>{selectedUser?.nama_teknisi}</strong>. Data yang dihapus tidak dapat dipulihkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">Hapus</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Edit User Modal */}
       {selectedUser && (
         <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
@@ -312,7 +377,7 @@ export default function UserRolesClient() {
               <DialogDescription>Atur role dan hak akses spesifik untuk pengguna ini.</DialogDescription>
             </DialogHeader>
             <Form {...editForm}>
-              <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-6 py-4">
+              <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-6 py-4 max-h-[70vh] overflow-y-auto pr-4">
                 <FormField
                   control={editForm.control}
                   name="role"
@@ -354,7 +419,7 @@ export default function UserRolesClient() {
                             <div key={group}>
                                 <h4 className="capitalize font-medium mb-2">{group.replace('userrole', 'user role').replace('reportstock', 'report stock')}</h4>
                                 <div className="grid grid-cols-2 gap-4 rounded-lg border p-4">
-                                {perms.map((permission) => (
+                                {perms.sort((a, b) => a.label.localeCompare(b.label)).map((permission) => (
                                 <FormField
                                     key={permission.id}
                                     control={editForm.control}
@@ -367,7 +432,7 @@ export default function UserRolesClient() {
                                             onCheckedChange={field.onChange}
                                         />
                                         </FormControl>
-                                        <FormLabel className="font-normal">
+                                        <FormLabel className="font-normal text-sm">
                                             {permission.label}
                                         </FormLabel>
                                     </FormItem>
@@ -380,7 +445,7 @@ export default function UserRolesClient() {
                     </div>
                 </div>
 
-                <DialogFooter>
+                <DialogFooter className="sticky bottom-0 bg-background pt-4">
                   <DialogClose asChild>
                     <Button type="button" variant="secondary">Batal</Button>
                   </DialogClose>
@@ -393,7 +458,7 @@ export default function UserRolesClient() {
       )}
 
       {/* Add User Modal */}
-      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+      <Dialog open={isAddUser} onOpenChange={setIsAddUser}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Tambah Pengguna Baru</DialogTitle>
@@ -440,8 +505,8 @@ export default function UserRolesClient() {
                 <DialogClose asChild>
                   <Button type="button" variant="secondary" onClick={() => addForm.reset()}>Batal</Button>
                 </DialogClose>
-                <Button type="submit" disabled={isAddingUser}>
-                  {isAddingUser ? "Menyimpan..." : "Simpan Pengguna"}
+                <Button type="submit" disabled={isAddUser}>
+                  {isAddUser ? "Menyimpan..." : "Simpan Pengguna"}
                 </Button>
               </DialogFooter>
             </form>

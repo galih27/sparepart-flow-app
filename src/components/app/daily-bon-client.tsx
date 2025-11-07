@@ -5,11 +5,11 @@ import { useState, useMemo, useEffect } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import * as z from "zod";
-import { Plus, Pencil, Eye } from 'lucide-react';
+import { Plus, Pencil, Eye, Trash2 } from 'lucide-react';
 import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
-import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,16 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { DataTablePagination } from '@/components/app/data-table-pagination';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -95,6 +105,7 @@ export default function DailyBonClient() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [selectedBon, setSelectedBon] = useState<DailyBon | null>(null);
 
   const addForm = useForm<z.infer<typeof addSchema>>({
@@ -191,6 +202,30 @@ export default function DailyBonClient() {
     setSelectedBon(bon);
     setIsViewModalOpen(true);
   };
+
+  const handleDelete = (bon: DailyBon) => {
+    if (permissions?.dailybon_delete) {
+      setSelectedBon(bon);
+      setIsDeleting(true);
+    } else {
+      toast({ variant: 'destructive', title: 'Akses Ditolak', description: 'Anda tidak memiliki izin untuk menghapus data ini.' });
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!selectedBon || !selectedBon.id || !firestore) return;
+
+    try {
+      await deleteDoc(doc(firestore, 'daily_bon', selectedBon.id));
+      toast({ title: "Sukses", description: "Bon harian telah dihapus." });
+    } catch (error) {
+      console.error("Error deleting document: ", error);
+      toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus bon harian." });
+    } finally {
+      setIsDeleting(false);
+      setSelectedBon(null);
+    }
+  };
   
   async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
@@ -228,37 +263,25 @@ export default function DailyBonClient() {
   const permissions = currentUser?.permissions;
 
   const renderActionCell = (item: DailyBon) => {
-    if (!permissions?.dailybon_edit) {
-        return (
-            <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-                <Eye className="h-4 w-4" />
-            </Button>
-        );
-    }
-    
-    // Admin and users with edit permission can always edit
-    if (currentUser.role === 'Admin' || permissions.dailybon_edit) {
-        return (
-            <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
-                <Pencil className="h-4 w-4" />
-            </Button>
-        );
-    }
-
-    // Teknisi logic
-    const isFinalStatus = item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED';
-    if (isFinalStatus) {
-        return (
-            <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-                <Eye className="h-4 w-4" />
-            </Button>
-        );
-    }
+    const canEdit = permissions?.dailybon_edit && !(item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED');
+    const canDelete = permissions?.dailybon_delete;
 
     return (
-        <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
-            <Pencil className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-0">
+            <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+                <Eye className="h-4 w-4" />
+            </Button>
+            {(currentUser?.role === 'Admin' || (currentUser?.role === 'Teknisi' && canEdit)) && (
+                 <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+                    <Pencil className="h-4 w-4" />
+                </Button>
+            )}
+            {canDelete && (
+                 <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
+                    <Trash2 className="h-4 w-4" />
+                </Button>
+            )}
+        </div>
     );
   };
 
@@ -325,7 +348,7 @@ export default function DailyBonClient() {
               {isLoading ? (
                  Array.from({ length: 5 }).map((_, index) => (
                     <TableRow key={index}>
-                        <TableCell><Skeleton className="h-8 w-8" /></TableCell>
+                        <TableCell><div className="flex gap-2"><Skeleton className="h-8 w-8" /><Skeleton className="h-8 w-8" /></div></TableCell>
                         <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
@@ -370,6 +393,21 @@ export default function DailyBonClient() {
           )}
         </div>
       </div>
+
+       <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tindakan ini akan menghapus bon untuk <strong>{selectedBon?.part}</strong> secara permanen. Data yang dihapus tidak dapat dipulihkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">Hapus</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="sm:max-w-2xl">

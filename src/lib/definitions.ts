@@ -4,12 +4,16 @@ export type Permissions = {
   dashboard_edit: boolean;
   reportstock_view: boolean;
   reportstock_edit: boolean;
+  reportstock_delete: boolean;
   bonpds_view: boolean;
   bonpds_edit: boolean;
+  bonpds_delete: boolean;
   dailybon_view: boolean;
   dailybon_edit: boolean;
+  dailybon_delete: boolean;
   userrole_view: boolean;
   userrole_edit: boolean;
+  userrole_delete: boolean;
   msk_view: boolean;
   msk_edit: boolean;
 };

@@ -5,11 +5,11 @@ import { useState, useMemo, useRef } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Eye, FileDown, FileUp, Pencil, Search } from 'lucide-react';
+import { Eye, FileDown, FileUp, Pencil, Search, Trash2 } from 'lucide-react';
 import type { InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
-import { collection, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 
 import PageHeader from '@/components/app/page-header';
@@ -24,6 +24,16 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { DataTablePagination } from '@/components/app/data-table-pagination';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -73,6 +83,7 @@ export default function ReportStockClient() {
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
@@ -113,6 +124,30 @@ export default function ReportStockClient() {
     }
   };
 
+  const handleDelete = (item: InventoryItem) => {
+    if (currentUser?.permissions.reportstock_delete) {
+      setSelectedItem(item);
+      setIsDeleting(true);
+    } else {
+       toast({ variant: 'destructive', title: 'Akses Ditolak', description: 'Anda tidak memiliki izin untuk menghapus data ini.' });
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!selectedItem || !selectedItem.id || !firestore) return;
+
+    try {
+      await deleteDoc(doc(firestore, 'inventory', selectedItem.id));
+      toast({ title: "Sukses", description: `Item ${selectedItem.part} telah dihapus.` });
+    } catch (error) {
+       console.error("Error deleting document: ", error);
+       toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus item." });
+    } finally {
+      setIsDeleting(false);
+      setSelectedItem(null);
+    }
+  };
+
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
@@ -144,7 +179,10 @@ export default function ReportStockClient() {
 
         const batch = writeBatch(firestore);
         json.forEach((row) => {
-          const docRef = doc(collection(firestore, "inventory"));
+          // Find existing doc to update or create a new one.
+          // For this app, we assume new import clears and replaces, so we just add.
+          // A more robust solution would be to check for existing `part` number.
+          const docRef = doc(collection(firestore, "inventory")); 
           const inventoryItem: Omit<InventoryItem, 'id'> = {
             part: row.part || '',
             deskripsi: row.deskripsi || '',
@@ -226,7 +264,7 @@ export default function ReportStockClient() {
   }
 
   const isLoading = isLoadingInventory || isLoadingAuth || isLoadingUser;
-  const canEdit = currentUser?.permissions.reportstock_edit;
+  const permissions = currentUser?.permissions;
 
   return (
     <>
@@ -245,7 +283,7 @@ export default function ReportStockClient() {
                 }}
               />
             </div>
-            {canEdit && (
+            {permissions?.reportstock_edit && (
                 <>
                     <Input
                         type="file"
@@ -284,7 +322,7 @@ export default function ReportStockClient() {
               {isLoading ? (
                 Array.from({ length: 5 }).map((_, index) => (
                   <TableRow key={index}>
-                    <TableCell><Skeleton className="h-8 w-8" /></TableCell>
+                    <TableCell><div className="flex gap-2"><Skeleton className="h-8 w-8" /><Skeleton className="h-8 w-8" /></div></TableCell>
                     <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[200px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
@@ -304,9 +342,16 @@ export default function ReportStockClient() {
                 paginatedData.map(item => (
                   <TableRow key={item.id}>
                     <TableCell>
-                      <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        {permissions?.reportstock_delete && (
+                          <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>{item.part}</TableCell>
                     <TableCell>{item.deskripsi}</TableCell>
@@ -331,7 +376,24 @@ export default function ReportStockClient() {
           )}
         </div>
       </div>
+      
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tindakan ini akan menghapus item <strong>{selectedItem?.part}</strong> secara permanen. Data yang dihapus tidak dapat dipulihkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">Hapus</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
+      {/* View/Edit Modal */}
       {selectedItem && (
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
           <DialogContent className="sm:max-w-lg">
@@ -370,9 +432,7 @@ export default function ReportStockClient() {
                     )}
                   />
                   <DialogFooter>
-                    <DialogClose asChild>
-                      <Button type="button" variant="secondary">Batal</Button>
-                    </DialogClose>
+                    <Button type="button" variant="secondary" onClick={() => setIsEditing(false)}>Batal</Button>
                     <Button type="submit">Simpan Perubahan</Button>
                   </DialogFooter>
                 </form>
@@ -409,9 +469,9 @@ export default function ReportStockClient() {
                 </div>
                 <DialogFooter>
                   <DialogClose asChild>
-                    <Button variant="secondary">Close</Button>                  
+                    <Button variant="secondary">Tutup</Button>                  
                   </DialogClose>
-                  {canEdit && <Button onClick={handleEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>}
+                  {permissions?.reportstock_edit && <Button onClick={handleEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>}
                 </DialogFooter>
               </div>
             )}

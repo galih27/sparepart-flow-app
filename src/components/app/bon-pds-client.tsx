@@ -5,11 +5,11 @@ import { useState, useMemo, useEffect } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import * as z from "zod";
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Trash2 } from 'lucide-react';
 import type { BonPDS, InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
-import { collection, addDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, doc, deleteDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,16 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { DataTablePagination } from '@/components/app/data-table-pagination';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -78,6 +88,8 @@ export default function BonPdsClient() {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [selectedBon, setSelectedBon] = useState<BonPDS | null>(null);
 
   const form = useForm<z.infer<typeof addSchema>>({
     resolver: zodResolver(addSchema),
@@ -110,7 +122,8 @@ export default function BonPdsClient() {
   const filteredData = useMemo(() => {
     if (!data) return [];
     return data.filter(item =>
-      item.site_bonpds.toLowerCase().includes(searchTerm.toLowerCase())
+      (item.site_bonpds && item.site_bonpds.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (item.part && item.part.toLowerCase().includes(searchTerm.toLowerCase()))
     ).sort((a, b) => new Date(b.tanggal_bonpds).getTime() - new Date(a.tanggal_bonpds).getTime());
   }, [data, searchTerm]);
 
@@ -120,6 +133,30 @@ export default function BonPdsClient() {
     const end = start + ITEMS_PER_PAGE;
     return filteredData.slice(start, end);
   }, [filteredData, currentPage]);
+
+  const handleDelete = (bon: BonPDS) => {
+    if (permissions?.bonpds_delete) {
+      setSelectedBon(bon);
+      setIsDeleting(true);
+    } else {
+       toast({ variant: 'destructive', title: 'Akses Ditolak', description: 'Anda tidak memiliki izin untuk menghapus data ini.' });
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!selectedBon || !selectedBon.id || !firestore) return;
+
+    try {
+      await deleteDoc(doc(firestore, 'bon_pds', selectedBon.id));
+      toast({ title: "Sukses", description: "Bon PDS telah dihapus." });
+    } catch (error) {
+      console.error("Error deleting document: ", error);
+      toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus Bon PDS." });
+    } finally {
+      setIsDeleting(false);
+      setSelectedBon(null);
+    }
+  };
   
   async function onSubmit(values: z.infer<typeof addSchema>) {
     if (!firestore) return;
@@ -157,7 +194,7 @@ export default function BonPdsClient() {
   } as const;
 
   const isLoading = isLoadingData || isLoadingInventory || isLoadingAuth || isLoadingUser;
-  const canEdit = currentUser?.permissions.bonpds_edit;
+  const permissions = currentUser?.permissions;
 
   return (
     <>
@@ -167,7 +204,7 @@ export default function BonPdsClient() {
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 type="search"
-                placeholder="Filter site..."
+                placeholder="Filter site atau part..."
                 className="w-full rounded-lg bg-background pl-8 sm:w-[200px]"
                 value={searchTerm}
                 onChange={(e) => {
@@ -176,7 +213,7 @@ export default function BonPdsClient() {
                 }}
               />
             </div>
-          {canEdit && (
+          {permissions?.bonpds_edit && (
             <Button onClick={() => setIsModalOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> Tambah
             </Button>
@@ -197,6 +234,7 @@ export default function BonPdsClient() {
                 <TableHead>Tanggal</TableHead>
                 <TableHead>No. Transaksi</TableHead>
                 <TableHead>Keterangan</TableHead>
+                {permissions?.bonpds_delete && <TableHead className="text-right">Action</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -211,11 +249,12 @@ export default function BonPdsClient() {
                         <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                        {permissions?.bonpds_delete && <TableCell><div className="flex justify-end"><Skeleton className="h-8 w-8" /></div></TableCell>}
                     </TableRow>
                  ))
               ) : paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center h-24">
+                  <TableCell colSpan={permissions?.bonpds_delete ? 9: 8} className="text-center h-24">
                     Tidak ada data Bon PDS.
                   </TableCell>
                 </TableRow>
@@ -229,6 +268,13 @@ export default function BonPdsClient() {
                   <TableCell>{item.tanggal_bonpds}</TableCell>
                   <TableCell>{item.no_transaksi}</TableCell>
                   <TableCell>{item.keterangan}</TableCell>
+                  {permissions?.bonpds_delete && (
+                    <TableCell className="text-right">
+                       <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
+                          <Trash2 className="h-4 w-4" />
+                       </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               )))}
             </TableBody>
@@ -244,6 +290,21 @@ export default function BonPdsClient() {
           )}
         </div>
       </div>
+      
+       <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tindakan ini akan menghapus Bon PDS untuk <strong>{selectedBon?.part}</strong> ke site <strong>{selectedBon?.site_bonpds}</strong>. Data yang dihapus tidak dapat dipulihkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">Hapus</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="sm:max-w-2xl">
