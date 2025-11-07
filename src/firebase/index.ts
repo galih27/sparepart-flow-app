@@ -1,3 +1,4 @@
+
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
@@ -14,21 +15,22 @@ import {
   FirebaseProvider,
 } from './provider';
 
-let firebaseApp: FirebaseApp;
-let auth: Auth;
-let firestore: Firestore;
-
+// This function initializes and returns the Firebase services.
+// It ensures that Firebase is initialized only once.
 function initializeFirebase() {
-  if (typeof window !== 'undefined') {
-    if (getApps().length === 0) {
-      firebaseApp = initializeApp(firebaseConfig);
-    } else {
-      firebaseApp = getApp();
-    }
-    auth = getAuth(firebaseApp);
-    firestore = getFirestore(firebaseApp);
+  let firebaseApp: FirebaseApp;
+  let auth: Auth;
+  let firestore: Firestore;
+
+  if (getApps().length === 0) {
+    firebaseApp = initializeApp(firebaseConfig);
+  } else {
+    firebaseApp = getApp();
   }
-  // @ts-ignore
+  
+  auth = getAuth(firebaseApp);
+  firestore = getFirestore(firebaseApp);
+
   return { firebaseApp, auth, firestore };
 }
 

@@ -1,15 +1,13 @@
+
 'use client';
 
 import { ReactNode } from 'react';
 import { FirebaseProvider, initializeFirebase } from '.';
 
+// This component now immediately initializes Firebase and provides it to its children.
+// It no longer shows a loading message, as initialization is synchronous.
 export function FirebaseClientProvider({ children }: { children: ReactNode }) {
   const { firebaseApp, auth, firestore } = initializeFirebase();
-
-  if (!firebaseApp || !auth || !firestore) {
-    // Anda bisa menampilkan loading indicator di sini jika perlu
-    return <p>Connecting to Firebase...</p>;
-  }
 
   return (
     <FirebaseProvider
