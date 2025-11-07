@@ -5,10 +5,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import * as z from "zod";
 import { Plus, Search } from 'lucide-react';
-import type { Msk, InventoryItem } from '@/lib/definitions';
+import type { Msk, InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
-import { useCollection, useFirestore } from '@/firebase';
-import { collection } from 'firebase/firestore';
+import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
+import { collection, doc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Form,
-  FormControl,
+FormControl,
   FormField,
   FormItem,
   FormLabel,
@@ -58,6 +58,15 @@ const ITEMS_PER_PAGE = 10;
 export default function MskClient({ data: initialData }: { data: Msk[] }) {
   const { toast } = useToast();
   const firestore = useFirestore();
+  const { user: authUser, isLoading: isLoadingAuth } = useUser();
+
+  const userDocRef = useMemo(() => {
+    if (!firestore || !authUser) return null;
+    return doc(firestore, 'users', authUser.uid);
+  }, [firestore, authUser]);
+
+  const { data: currentUser, isLoading: isLoadingUser } = useDoc<User>(userDocRef);
+
   const inventoryQuery = useMemo(() => {
     if (!firestore) return null;
     return collection(firestore, 'inventory');
@@ -140,6 +149,8 @@ export default function MskClient({ data: initialData }: { data: Msk[] }) {
     'CANCELED': 'destructive'
   } as const;
 
+  const isManager = currentUser?.role === 'Manager';
+
 
   return (
     <>
@@ -158,9 +169,11 @@ export default function MskClient({ data: initialData }: { data: Msk[] }) {
                 }}
               />
             </div>
-          <Button onClick={() => setIsModalOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" /> Tambah
-          </Button>
+          {!isManager && (
+            <Button onClick={() => setIsModalOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" /> Tambah
+            </Button>
+          )}
         </div>
       </PageHeader>
 

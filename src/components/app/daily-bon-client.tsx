@@ -72,7 +72,7 @@ const ITEMS_PER_PAGE = 10;
 export default function DailyBonClient() {
   const { toast } = useToast();
   const firestore = useFirestore();
-  const { user: authUser } = useUser();
+  const { user: authUser, isLoading: isLoadingAuth } = useUser();
 
   const userDocRef = useMemo(() => {
     if (!firestore || !authUser) return null;
@@ -131,14 +131,19 @@ export default function DailyBonClient() {
 
   const filteredData = useMemo(() => {
     if (!data) return [];
-    return data.filter(item =>
+    let bonData = data;
+    // Teknisi can only see their own bon
+    if (currentUser?.role === 'Teknisi') {
+        bonData = data.filter(item => item.teknisi === currentUser.nama_teknisi);
+    }
+    return bonData.filter(item =>
       (filterTeknisi === '' || item.teknisi === filterTeknisi) &&
       (filterStatus === '' || item.status_bon === filterStatus)
     ).sort((a, b) => {
         if (!a.tanggal_dailybon || !b.tanggal_dailybon) return 0;
         return new Date(b.tanggal_dailybon).getTime() - new Date(a.tanggal_dailybon).getTime()
     });
-  }, [data, filterTeknisi, filterStatus]);
+  }, [data, filterTeknisi, filterStatus, currentUser]);
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedData = useMemo(() => {
@@ -219,12 +224,16 @@ export default function DailyBonClient() {
     'CANCELED': 'destructive'
   } as const;
 
-  const isLoading = isLoadingData || isLoadingUsers || isLoadingInventory || isLoadingUser;
+  const isLoading = isLoadingData || isLoadingUsers || isLoadingInventory || isLoadingAuth || isLoadingUser;
 
   const userRole = currentUser?.role;
   const isAdmin = userRole === 'Admin';
+  const isManager = userRole === 'Manager';
+  const isTeknisi = userRole === 'Teknisi';
 
   const renderActionCell = (item: DailyBon) => {
+    if (isManager) return null; // Manager can't edit
+
     const isFinalStatus = item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED';
     
     if (isAdmin) {
@@ -235,19 +244,23 @@ export default function DailyBonClient() {
       );
     }
 
-    if (isFinalStatus) {
-      return (
-        <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-          <Eye className="h-4 w-4" />
-        </Button>
-      );
-    }
+    if (isTeknisi) {
+        if (isFinalStatus) {
+        return (
+            <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+            <Eye className="h-4 w-4" />
+            </Button>
+        );
+        }
 
-    return (
-      <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
-        <Pencil className="h-4 w-4" />
-      </Button>
-    );
+        return (
+        <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+            <Pencil className="h-4 w-4" />
+        </Button>
+        );
+    }
+    
+    return null;
   };
 
 
@@ -255,34 +268,40 @@ export default function DailyBonClient() {
     <>
       <PageHeader title="Daily Bon">
         <div className="flex items-center gap-2">
-           <Select value={filterTeknisi} onValueChange={(value) => {setFilterTeknisi(value === 'all' ? '' : value); setCurrentPage(1);}}>
-              <SelectTrigger className="w-[180px] bg-background">
-                <SelectValue placeholder="Filter Teknisi" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Teknisi</SelectItem>
-                {users?.filter(u => u.role === 'Teknisi').map(user => (
-                    <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+           {!isTeknisi && (
+            <>
+                <Select value={filterTeknisi} onValueChange={(value) => {setFilterTeknisi(value === 'all' ? '' : value); setCurrentPage(1);}}>
+                    <SelectTrigger className="w-[180px] bg-background">
+                        <SelectValue placeholder="Filter Teknisi" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">Semua Teknisi</SelectItem>
+                        {users?.filter(u => u.role === 'Teknisi').map(user => (
+                            <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
+                        ))}
+                    </SelectContent>
+                    </Select>
 
-            <Select value={filterStatus} onValueChange={(value) => {setFilterStatus(value === 'all' ? '' : value); setCurrentPage(1);}}>
-              <SelectTrigger className="w-[180px] bg-background">
-                <SelectValue placeholder="Filter Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Status</SelectItem>
-                <SelectItem value="BON">BON</SelectItem>
-                <SelectItem value="RECEIVED">RECEIVED</SelectItem>
-                <SelectItem value="KMP">KMP</SelectItem>
-                <SelectItem value="CANCELED">CANCELED</SelectItem>
-              </SelectContent>
-            </Select>
+                    <Select value={filterStatus} onValueChange={(value) => {setFilterStatus(value === 'all' ? '' : value); setCurrentPage(1);}}>
+                    <SelectTrigger className="w-[180px] bg-background">
+                        <SelectValue placeholder="Filter Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">Semua Status</SelectItem>
+                        <SelectItem value="BON">BON</SelectItem>
+                        <SelectItem value="RECEIVED">RECEIVED</SelectItem>
+                        <SelectItem value="KMP">KMP</SelectItem>
+                        <SelectItem value="CANCELED">CANCELED</SelectItem>
+                    </SelectContent>
+                </Select>
+            </>
+           )}
 
-          <Button onClick={() => setIsAddModalOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" /> Tambah
-          </Button>
+          {!isManager && (
+            <Button onClick={() => setIsAddModalOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Tambah
+            </Button>
+          )}
         </div>
       </PageHeader>
 
@@ -291,7 +310,7 @@ export default function DailyBonClient() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Action</TableHead>
+                {!isManager && <TableHead>Action</TableHead>}
                 <TableHead>Part</TableHead>
                 <TableHead>Deskripsi</TableHead>
                 <TableHead>Qty</TableHead>
@@ -307,7 +326,7 @@ export default function DailyBonClient() {
               {isLoading ? (
                  Array.from({ length: 5 }).map((_, index) => (
                     <TableRow key={index}>
-                        <TableCell><Skeleton className="h-8 w-8" /></TableCell>
+                        {!isManager && <TableCell><Skeleton className="h-8 w-8" /></TableCell>}
                         <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
@@ -321,15 +340,13 @@ export default function DailyBonClient() {
                  ))
               ) : paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center h-24">
+                  <TableCell colSpan={isManager ? 9 : 10} className="text-center h-24">
                     Tidak ada data bon harian.
                   </TableCell>
                 </TableRow>
               ) : (paginatedData.map(item => (
                 <TableRow key={item.id}>
-                  <TableCell>
-                    {renderActionCell(item)}
-                  </TableCell>
+                  {!isManager && <TableCell>{renderActionCell(item)}</TableCell>}
                   <TableCell className="font-medium">{item.part}</TableCell>
                   <TableCell>{item.deskripsi}</TableCell>
                   <TableCell>{item.qty_dailybon}</TableCell>
@@ -425,7 +442,12 @@ export default function DailyBonClient() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Teknisi</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select 
+                        onValueChange={field.onChange} 
+                        defaultValue={field.value} 
+                        value={isTeknisi ? currentUser?.nama_teknisi : field.value}
+                        disabled={isTeknisi}
+                    >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Pilih Teknisi" />

@@ -2,8 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { useRouter } from "next/navigation";
+import { Suspense, useMemo } from "react";
 import { PlaceHolderImages } from "@/lib/placeholder-images";
 import {
   LogOut,
@@ -23,16 +23,31 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useUser, useDoc, useFirestore } from "@/firebase";
+import { doc } from "firebase/firestore";
+import type { User } from "@/lib/definitions";
+import { Skeleton } from "../ui/skeleton";
 
 function HeaderContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const userName = "Admin";
+  const { user: authUser, isLoading: isLoadingUser } = useUser();
+  const firestore = useFirestore();
+
+  const userDocRef = useMemo(() => {
+    if (!firestore || !authUser) return null;
+    return doc(firestore, 'users', authUser.uid);
+  }, [firestore, authUser]);
+
+  const { data: currentUser, isLoading: isLoadingRole } = useDoc<User>(userDocRef);
+
   const userAvatar = PlaceHolderImages.find((img) => img.id === "user-avatar");
 
   const handleLogout = () => {
+    // Note: We'll implement Firebase sign out later
     router.push("/login");
   };
+
+  const isLoading = isLoadingUser || isLoadingRole;
   
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6">
@@ -56,7 +71,7 @@ function HeaderContent() {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="relative h-9 w-9 rounded-full">
             <Avatar className="h-9 w-9">
-              {userAvatar && <AvatarImage src={userAvatar.imageUrl} alt={userName} data-ai-hint={userAvatar.imageHint} />}
+              {userAvatar && <AvatarImage src={userAvatar.imageUrl} alt={currentUser?.nama_teknisi} data-ai-hint={userAvatar.imageHint} />}
               <AvatarFallback>
                 <UserCircle />
               </AvatarFallback>
@@ -65,17 +80,24 @@ function HeaderContent() {
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-56" align="end" forceMount>
           <DropdownMenuLabel className="font-normal">
-            <div className="flex flex-col space-y-1">
-              <p className="text-sm font-medium leading-none">{userName}</p>
-              <p className="text-xs leading-none text-muted-foreground">
-                {userName.toLowerCase().replace(' ','_')}@example.com
-              </p>
-            </div>
+             {isLoading ? (
+                <div className="flex flex-col space-y-2">
+                  <Skeleton className="h-4 w-[150px]" />
+                  <Skeleton className="h-3 w-[100px]" />
+                </div>
+              ) : (
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium leading-none">{currentUser?.nama_teknisi || 'Pengguna'}</p>
+                  <p className="text-xs leading-none text-muted-foreground">
+                    {currentUser?.email || 'Tidak ada email'}
+                  </p>
+                </div>
+              )}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem>
             <UserCircle className="mr-2 h-4 w-4" />
-            <span>Profil</span>
+            <span>Profil ({currentUser?.role || '...'})</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleLogout}>

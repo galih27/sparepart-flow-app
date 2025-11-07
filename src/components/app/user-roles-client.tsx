@@ -328,7 +328,7 @@ export default function UserRolesClient() {
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Pilih Role" />
-                          </SelectTrigger>
+                          </Trigger>
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="Admin">Admin</SelectItem>

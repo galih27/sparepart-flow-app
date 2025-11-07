@@ -1,13 +1,17 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 import Link from "next/link";
+import { doc } from "firebase/firestore";
+import { useDoc, useFirestore, useUser } from "@/firebase";
+import type { User } from "@/lib/definitions";
 import {
   SidebarContent,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
+  SidebarMenuSkeleton,
 } from "@/components/ui/sidebar";
 import {
   LayoutDashboard,
@@ -18,38 +22,55 @@ import {
   Users,
 } from "lucide-react";
 
-const menuItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/report-stock", label: "Report Stock", icon: Warehouse },
-  { href: "/daily-bon", label: "Daily Bon", icon: Truck },
-  { href: "/bon-pds", label: "Bon PDS", icon: ArrowRightLeft },
-  { href: "/msk", label: "MSK", icon: PackagePlus },
-  { href: "/user-roles", label: "User Role", icon: Users },
+const allMenuItems = [
+  { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["Admin", "Manager", "Teknisi"] },
+  { href: "/report-stock", label: "Report Stock", icon: Warehouse, roles: ["Admin", "Manager"] },
+  { href: "/daily-bon", label: "Daily Bon", icon: Truck, roles: ["Admin", "Manager", "Teknisi"] },
+  { href: "/bon-pds", label: "Bon PDS", icon: ArrowRightLeft, roles: ["Admin", "Manager"] },
+  { href: "/msk", label: "MSK", icon: PackagePlus, roles: ["Admin", "Manager"] },
+  { href: "/user-roles", label: "User Role", icon: Users, roles: ["Admin"] },
 ];
 
 function SidebarNavContent() {
   const pathname = usePathname();
+  const { user: authUser, isLoading: isLoadingUser } = useUser();
+  const firestore = useFirestore();
 
-  const createHref = (href: string) => {
-    return href;
-  }
+  const userDocRef = useMemo(() => {
+    if (!firestore || !authUser) return null;
+    return doc(firestore, 'users', authUser.uid);
+  }, [firestore, authUser]);
+
+  const { data: currentUser, isLoading: isLoadingRole } = useDoc<User>(userDocRef);
+
+  const userRole = currentUser?.role;
+  const isLoading = isLoadingUser || isLoadingRole;
+
+  const menuItems = useMemo(() => {
+    if (!userRole) return [];
+    return allMenuItems.filter(item => item.roles.includes(userRole));
+  }, [userRole]);
 
   return (
     <SidebarContent>
       <SidebarMenu>
-        {menuItems.map((item) => (
-          <SidebarMenuItem key={item.href}>
-            <Link href={createHref(item.href)} passHref>
-              <SidebarMenuButton
-                isActive={pathname === item.href}
-                tooltip={item.label}
-              >
-                <item.icon />
-                <span>{item.label}</span>
-              </SidebarMenuButton>
-            </Link>
-          </SidebarMenuItem>
-        ))}
+        {isLoading ? (
+           Array.from({ length: 5 }).map((_, index) => <SidebarMenuSkeleton key={index} showIcon />)
+        ) : (
+          menuItems.map((item) => (
+            <SidebarMenuItem key={item.href}>
+              <Link href={item.href} passHref>
+                <SidebarMenuButton
+                  isActive={pathname === item.href}
+                  tooltip={item.label}
+                >
+                  <item.icon />
+                  <span>{item.label}</span>
+                </SidebarMenuButton>
+              </Link>
+            </SidebarMenuItem>
+          ))
+        )}
       </SidebarMenu>
     </SidebarContent>
   );

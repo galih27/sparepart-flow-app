@@ -5,9 +5,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { Eye, FileDown, FileUp, Pencil, Search } from 'lucide-react';
-import type { InventoryItem } from '@/lib/definitions';
+import type { InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
-import { useCollection, useFirestore } from '@/firebase';
+import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
 import { collection, doc, updateDoc, writeBatch } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 
@@ -52,12 +52,21 @@ const ITEMS_PER_PAGE = 10;
 export default function ReportStockClient() {
   const { toast } = useToast();
   const firestore = useFirestore();
+  const { user: authUser, isLoading: isLoadingAuth } = useUser();
+
+  const userDocRef = useMemo(() => {
+    if (!firestore || !authUser) return null;
+    return doc(firestore, 'users', authUser.uid);
+  }, [firestore, authUser]);
+
+  const { data: currentUser, isLoading: isLoadingUser } = useDoc<User>(userDocRef);
+
   const inventoryQuery = useMemo(() => {
     if (!firestore) return null;
     return collection(firestore, 'inventory');
   }, [firestore]);
   
-  const { data: initialData, isLoading } = useCollection<InventoryItem>(inventoryQuery);
+  const { data: initialData, isLoading: isLoadingInventory } = useCollection<InventoryItem>(inventoryQuery);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -211,35 +220,44 @@ export default function ReportStockClient() {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
   }
 
+  const isLoading = isLoadingInventory || isLoadingAuth || isLoadingUser;
+  const isManager = currentUser?.role === 'Manager';
+
   return (
     <>
       <PageHeader title="Report Stock">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="Cari part atau deskripsi..."
-            className="w-full rounded-lg bg-background pl-8 sm:w-[300px]"
-            value={searchTerm}
-            onChange={(e) => {
-              setSearchTerm(e.target.value);
-              setCurrentPage(1);
-            }}
-          />
+        <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Cari part atau deskripsi..."
+                className="w-full rounded-lg bg-background pl-8 sm:w-[300px]"
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+              />
+            </div>
+            {!isManager && (
+                <>
+                    <Input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                        className="hidden"
+                        accept=".xlsx, .xls"
+                        />
+                    <Button variant="outline" onClick={handleImportClick} disabled={isImporting}>
+                        <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Upload Excel'}
+                    </Button>
+                    <Button onClick={handleExport} disabled={isExporting}>
+                        <FileDown className="mr-2" /> {isExporting ? 'Mengekspor...' : 'Export Excel'}
+                    </Button>
+                </>
+            )}
         </div>
-        <Input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          className="hidden"
-          accept=".xlsx, .xls"
-        />
-        <Button variant="outline" onClick={handleImportClick} disabled={isImporting}>
-          <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Upload Excel'}
-        </Button>
-        <Button onClick={handleExport} disabled={isExporting}>
-            <FileDown className="mr-2" /> {isExporting ? 'Mengekspor...' : 'Export Excel'}
-        </Button>
       </PageHeader>
 
       <div className="p-4 md:p-6">
@@ -386,9 +404,9 @@ export default function ReportStockClient() {
                 </div>
                 <DialogFooter>
                   <DialogClose asChild>
-                    <Button variant="secondary">Close</Button>
+                    <Button variant="secondary">Close</Button>                  
                   </DialogClose>
-                  <Button onClick={handleEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>
+                  {!isManager && <Button onClick={handleEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>}
                 </DialogFooter>
               </div>
             )}
