@@ -63,6 +63,7 @@ const addSchema = z.object({
 const editSchema = z.object({
   status_bon: z.enum(["BON", "RECEIVED", "KMP", "CANCELED"]),
   no_tkl: z.string().optional(),
+  keterangan: z.string().optional(),
 })
 
 const ITEMS_PER_PAGE = 10;
@@ -166,6 +167,7 @@ export default function DailyBonClient() {
     editForm.reset({
       status_bon: bon.status_bon,
       no_tkl: bon.no_tkl || '',
+      keterangan: bon.keterangan || '',
     });
     setIsEditModalOpen(true);
   };
@@ -179,6 +181,7 @@ export default function DailyBonClient() {
       await updateDoc(bonRef, {
         status_bon: values.status_bon,
         no_tkl: values.no_tkl,
+        keterangan: values.keterangan
       });
       toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
       setIsEditModalOpen(false);
@@ -459,6 +462,19 @@ export default function DailyBonClient() {
                                     <FormLabel>No. TKL</FormLabel>
                                     <FormControl>
                                         <Input placeholder="Isi No. TKL jika ada" {...field} />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                        <FormField
+                            control={editForm.control}
+                            name="keterangan"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Keterangan</FormLabel>
+                                    <FormControl>
+                                        <Textarea placeholder="Keterangan opsional..." {...field} />
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
