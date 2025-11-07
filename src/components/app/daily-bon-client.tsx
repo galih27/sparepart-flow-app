@@ -275,7 +275,7 @@ export default function DailyBonClient() {
             <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
                 <Eye className="h-4 w-4" />
             </Button>
-            {(currentUser?.role === 'Admin' || (currentUser?.role === 'Teknisi' && canEdit)) && (
+            {(currentUser?.role === 'Admin' || canEdit) && (
                  <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
                     <Pencil className="h-4 w-4" />
                 </Button>
@@ -650,11 +650,3 @@ export default function DailyBonClient() {
     </>
   );
 }
-
-    
-
-    
-
-    
-
-    

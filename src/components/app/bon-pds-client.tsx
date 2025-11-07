@@ -261,7 +261,7 @@ export default function BonPdsClient() {
             <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
                 <Eye className="h-4 w-4" />
             </Button>
-            {canEdit && (
+            {(currentUser?.role === 'Admin' || canEdit) && (
                  <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
                     <Pencil className="h-4 w-4" />
                 </Button>
