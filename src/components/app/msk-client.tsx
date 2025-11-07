@@ -9,7 +9,7 @@ import { Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
 import type { Msk, InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
-import { collection, doc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, addDoc, updateDoc, deleteDoc, runTransaction, query, where, getDocs } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -194,42 +194,81 @@ export default function MskClient() {
   
   async function onSubmit(values: z.infer<typeof formSchema>) {
     if (!firestore) return;
+    
+    const isEditing = !!selectedMsk?.id;
+    const originalStatus = isEditing ? selectedMsk.status_msk : null;
+    const newStatus = values.status_msk;
 
-    if (selectedMsk && selectedMsk.id) { // Update existing MSK
-      const mskRef = doc(firestore, 'msk', selectedMsk.id);
-      try {
-        await updateDoc(mskRef, {
-          ...values,
-          tanggal_msk: new Date().toISOString().split('T')[0],
-        });
-        toast({ title: "Sukses", description: "Data MSK berhasil diperbarui." });
+    try {
+      await runTransaction(firestore, async (transaction) => {
+        let mskRef;
+
+        if (isEditing) {
+          // Update existing MSK
+          mskRef = doc(firestore, 'msk', selectedMsk.id!);
+          transaction.update(mskRef, {
+            ...values,
+          });
+        } else {
+          // Add new MSK
+          const newMsk: Omit<Msk, 'id' | 'harga'> = {
+              part: values.part,
+              deskripsi: values.deskripsi,
+              qty_msk: values.qty_msk,
+              status_msk: 'BON', // Always start with BON
+              site_msk: values.site_msk,
+              tanggal_msk: new Date().toISOString().split('T')[0],
+              no_transaksi: values.no_transaksi,
+              keterangan: values.keterangan || '',
+          };
+          mskRef = doc(collection(firestore, 'msk'));
+          transaction.set(mskRef, newMsk);
+        }
+
+        // Check if we need to update inventory
+        const shouldUpdateInventory = 
+          newStatus === 'RECEIVED' && originalStatus !== 'RECEIVED';
+
+        if (shouldUpdateInventory) {
+          const inventoryCol = collection(firestore, 'inventory');
+          const q = query(inventoryCol, where("part", "==", values.part));
+          const inventorySnapshot = await getDocs(q);
+
+          if (inventorySnapshot.empty) {
+            // If part does not exist, we can't add stock to it.
+            // A more robust solution might be to create it, but for now, we'll throw an error.
+            throw new Error(`Part ${values.part} tidak ditemukan di Report Stock.`);
+          }
+
+          const inventoryDoc = inventorySnapshot.docs[0];
+          const inventoryRef = inventoryDoc.ref;
+          const currentInventory = inventoryDoc.data() as InventoryItem;
+
+          const newQtyBaik = currentInventory.qty_baik + values.qty_msk;
+          const newAvailableQty = currentInventory.available_qty + values.qty_msk;
+
+          transaction.update(inventoryRef, {
+            qty_baik: newQtyBaik,
+            available_qty: newAvailableQty,
+            qty_real: newQtyBaik + currentInventory.qty_rusak, // Update qty_real as well
+          });
+        }
+      });
+
+      if (isEditing) {
+        toast({ title: "Sukses", description: "Data MSK berhasil diperbarui dan stok telah disesuaikan." });
         setIsEditModalOpen(false);
         setSelectedMsk(null);
-      } catch (error) {
-        console.error("Error updating document: ", error);
-        toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui data MSK." });
+      } else {
+        toast({ title: "Sukses", description: "Data MSK berhasil ditambahkan." });
+        setIsAddModalOpen(false);
       }
-    } else { // Add new MSK
-      const newMsk: Omit<Msk, 'id'> = {
-          part: values.part,
-          deskripsi: values.deskripsi,
-          qty_msk: values.qty_msk,
-          status_msk: 'BON',
-          site_msk: values.site_msk,
-          tanggal_msk: new Date().toISOString().split('T')[0],
-          no_transaksi: values.no_transaksi,
-          keterangan: values.keterangan || '',
-      };
-      try {
-          await addDoc(collection(firestore, 'msk'), newMsk);
-          toast({ title: "Sukses", description: "Data MSK berhasil ditambahkan." });
-          setIsAddModalOpen(false);
-      } catch (error) {
-          console.error("Error adding document: ", error);
-          toast({ variant: "destructive", title: "Gagal", description: "Gagal menambahkan data MSK." });
-      }
+      form.reset();
+
+    } catch (error: any) {
+      console.error("Error in transaction: ", error);
+      toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menyimpan data MSK." });
     }
-    form.reset();
   }
   
   const formatCurrency = (value: number) => {
@@ -272,13 +311,13 @@ export default function MskClient() {
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
         <FormField control={form.control} name="part" render={({ field }) => (
-            <FormItem><FormLabel>Part</FormLabel><FormControl><Input placeholder="PN-001" {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem><FormLabel>Part</FormLabel><FormControl><Input placeholder="PN-001" {...field} disabled={isEdit} /></FormControl><FormMessage /></FormItem>
         )}/>
         <FormField control={form.control} name="deskripsi" render={({ field }) => (
             <FormItem><FormLabel>Deskripsi</FormLabel><FormControl><Input placeholder="Otomatis terisi" {...field} readOnly className="bg-muted" /></FormControl><FormMessage /></FormItem>
         )}/>
         <FormField control={form.control} name="qty_msk" render={({ field }) => (
-            <FormItem><FormLabel>Qty</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem><FormLabel>Qty</FormLabel><FormControl><Input type="number" {...field} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'} /></FormControl><FormMessage /></FormItem>
         )}/>
         <FormField control={form.control} name="harga" render={({ field }) => (
             <FormItem><FormLabel>Harga</FormLabel><FormControl><Input value={formatCurrency(field.value)} readOnly className="bg-muted"/></FormControl><FormMessage /></FormItem>
@@ -289,9 +328,9 @@ export default function MskClient() {
             render={({ field }) => (
                 <FormItem>
                     <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={!isEdit}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={!isEdit && !isAddModalOpen}>
                         <FormControl>
-                            <SelectTrigger className={!isEdit ? "bg-muted" : ""}>
+                            <SelectTrigger className={(!isEdit && !isAddModalOpen) ? "bg-muted" : ""}>
                                 <SelectValue placeholder="Pilih Status" />
                             </SelectTrigger>
                         </FormControl>
@@ -341,7 +380,16 @@ export default function MskClient() {
             </div>
           {permissions?.msk_edit && (
             <Button onClick={() => {
-              form.reset(); 
+              form.reset({
+                part: "",
+                deskripsi: "",
+                qty_msk: 1,
+                harga: 0,
+                site_msk: "",
+                no_transaksi: "",
+                status_msk: "BON",
+                keterangan: "",
+              }); 
               setSelectedMsk(null);
               setIsAddModalOpen(true);
             }}>

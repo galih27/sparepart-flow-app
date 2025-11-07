@@ -9,7 +9,7 @@ import { Plus, Pencil, Eye, Trash2 } from 'lucide-react';
 import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, runTransaction, query, where, getDocs, writeBatch } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -235,19 +235,57 @@ export default function DailyBonClient() {
     if (!firestore || !selectedBon || !selectedBon.id) return;
   
     const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
+    const originalStatus = selectedBon.status_bon;
+    const newStatus = values.status_bon;
   
     try {
-      await updateDoc(bonRef, {
-        status_bon: values.status_bon,
-        no_tkl: values.no_tkl,
-        keterangan: values.keterangan
+      await runTransaction(firestore, async (transaction) => {
+        // 1. Update the Daily Bon document
+        transaction.update(bonRef, {
+          status_bon: values.status_bon,
+          no_tkl: values.no_tkl,
+          keterangan: values.keterangan
+        });
+  
+        // 2. Check if we need to update inventory
+        const shouldUpdateInventory = 
+          (newStatus === 'RECEIVED' || newStatus === 'KMP') && 
+          originalStatus !== 'RECEIVED' && 
+          originalStatus !== 'KMP';
+  
+        if (shouldUpdateInventory) {
+          const inventoryCol = collection(firestore, 'inventory');
+          const q = query(inventoryCol, where("part", "==", selectedBon.part));
+          const inventorySnapshot = await getDocs(q);
+  
+          if (inventorySnapshot.empty) {
+            throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
+          }
+  
+          const inventoryDoc = inventorySnapshot.docs[0];
+          const inventoryRef = inventoryDoc.ref;
+          const currentInventory = inventoryDoc.data() as InventoryItem;
+  
+          const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_dailybon;
+          const newAvailableQty = currentInventory.available_qty - selectedBon.qty_dailybon;
+  
+          if (newQtyBaik < 0) {
+            throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
+          }
+  
+          transaction.update(inventoryRef, {
+            qty_baik: newQtyBaik,
+            available_qty: newAvailableQty
+          });
+        }
       });
-      toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
+  
+      toast({ title: "Sukses", description: "Status bon berhasil diperbarui dan stok telah disesuaikan." });
       setIsEditModalOpen(false);
       setSelectedBon(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating document: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui status bon." });
+      toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal memperbarui status bon." });
     }
   }
 
