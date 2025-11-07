@@ -80,6 +80,7 @@ const permissionsSchema = z.object({
   userrole_delete: z.boolean(),
   msk_view: z.boolean(),
   msk_edit: z.boolean(),
+  msk_delete: z.boolean(),
 });
 
 const editSchema = z.object({
@@ -102,7 +103,7 @@ const rolePermissions: Record<Role, Permissions> = {
     bonpds_view: true, bonpds_edit: true, bonpds_delete: true,
     dailybon_view: true, dailybon_edit: true, dailybon_delete: true,
     userrole_view: true, userrole_edit: true, userrole_delete: true,
-    msk_view: true, msk_edit: true,
+    msk_view: true, msk_edit: true, msk_delete: true,
   },
   Manager: {
     dashboard_view: true, dashboard_edit: true,
@@ -110,7 +111,7 @@ const rolePermissions: Record<Role, Permissions> = {
     bonpds_view: true, bonpds_edit: true, bonpds_delete: false,
     dailybon_view: true, dailybon_edit: false, dailybon_delete: false,
     userrole_view: true, userrole_edit: true, userrole_delete: false,
-    msk_view: true, msk_edit: false,
+    msk_view: true, msk_edit: true, msk_delete: false,
   },
   Teknisi: {
     dashboard_view: true, dashboard_edit: false,
@@ -118,7 +119,7 @@ const rolePermissions: Record<Role, Permissions> = {
     bonpds_view: false, bonpds_edit: false, bonpds_delete: false,
     dailybon_view: true, dailybon_edit: true, dailybon_delete: false,
     userrole_view: true, userrole_edit: false, userrole_delete: false,
-    msk_view: false, msk_edit: false,
+    msk_view: false, msk_edit: false, msk_delete: false,
   },
   Viewer: {
     dashboard_view: true, dashboard_edit: false,
@@ -126,7 +127,7 @@ const rolePermissions: Record<Role, Permissions> = {
     bonpds_view: false, bonpds_edit: false, bonpds_delete: false,
     dailybon_view: false, dailybon_edit: false, dailybon_delete: false,
     userrole_view: true, userrole_edit: false, userrole_delete: false,
-    msk_view: false, msk_edit: false,
+    msk_view: false, msk_edit: false, msk_delete: false,
   },
 };
 
@@ -144,6 +145,7 @@ const permissionLabels: { id: keyof Permissions, label: string }[] = [
     { id: 'bonpds_delete', label: 'Delete Bon PDS' },
     { id: 'msk_view', label: 'View MSK' },
     { id: 'msk_edit', label: 'Edit MSK' },
+    { id: 'msk_delete', label: 'Delete MSK' },
     { id: 'userrole_view', label: 'View User Role' },
     { id: 'userrole_edit', label: 'Edit User Role' },
     { id: 'userrole_delete', label: 'Delete User Role' },

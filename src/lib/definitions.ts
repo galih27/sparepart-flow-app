@@ -16,6 +16,7 @@ export type Permissions = {
   userrole_delete: boolean;
   msk_view: boolean;
   msk_edit: boolean;
+  msk_delete: boolean;
 };
 
 export type Role = 'Admin' | 'Teknisi' | 'Manager' | 'Viewer';
@@ -74,7 +75,6 @@ export type BonPDS = {
 
 export type Msk = {
   id?: string; // ID from Firestore
-  id_msk: string;
   part: string;
   deskripsi: string;
   qty_msk: number;

@@ -1,3 +1,4 @@
+
 import type { User, DailyBon, BonPDS, Msk } from './definitions';
 
 export const usersData: User[] = [];
