@@ -80,41 +80,6 @@ const editSchema = z.object({
 
 const ITEMS_PER_PAGE = 10;
 
-/**
- * Updates the inventory based on a DailyBon transaction.
- * @param transaction - The Firestore transaction.
- * @param firestore - The Firestore instance.
- * @param bon - The daily bon data.
- * @param change - The stock change amount (-qty for deduction, +qty for restock).
- */
-async function updateInventoryForBon(transaction: Transaction, firestore: any, bon: Omit<DailyBon, 'id'>, change: number) {
-    if (change === 0) return;
-
-    const inventoryCol = collection(firestore, 'inventory');
-    const q = query(inventoryCol, where("part", "==", bon.part));
-    const inventorySnapshot = await transaction.get(q);
-
-    if (inventorySnapshot.empty) {
-        throw new Error(`Part ${bon.part} tidak ditemukan di Report Stock.`);
-    }
-
-    const inventoryDoc = inventorySnapshot.docs[0];
-    const inventoryRef = inventoryDoc.ref;
-    const currentInventory = inventoryDoc.data() as InventoryItem;
-
-    const newQtyBaik = currentInventory.qty_baik + change;
-    if (newQtyBaik < 0) {
-        throw new Error(`Stok 'baik' untuk part ${bon.part} tidak mencukupi.`);
-    }
-    const newAvailableQty = currentInventory.available_qty + change;
-
-    transaction.update(inventoryRef, {
-        qty_baik: newQtyBaik,
-        available_qty: newAvailableQty
-    });
-}
-
-
 export default function DailyBonClient() {
   const { toast } = useToast();
   const firestore = useFirestore();
@@ -224,19 +189,10 @@ export default function DailyBonClient() {
     };
     
     try {
-        await runTransaction(firestore, async (transaction) => {
-            const newBonRef = doc(collection(firestore, 'daily_bon'));
-            transaction.set(newBonRef, newBon);
-
-            const willStockBeDeducted = newBon.status_bon === 'RECEIVED' || newBon.status_bon === 'KMP';
-            if (willStockBeDeducted) {
-                await updateInventoryForBon(transaction, firestore, newBon, -newBon.qty_dailybon);
-            }
-        });
-
-        toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan dan stok diperbarui." });
-        setIsAddModalOpen(false);
-        addForm.reset();
+      await addDoc(collection(firestore, 'daily_bon'), newBon);
+      toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan." });
+      setIsAddModalOpen(false);
+      addForm.reset();
     } catch (error: any) {
         console.error("Error adding document: ", error);
         toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menambahkan data bon harian." });
@@ -271,26 +227,8 @@ export default function DailyBonClient() {
     if (!selectedBon || !selectedBon.id || !firestore) return;
 
     try {
-        await runTransaction(firestore, async (transaction) => {
-            const bonRef = doc(firestore, 'daily_bon', selectedBon.id!);
-            const bonDoc = await transaction.get(bonRef);
-            if (!bonDoc.exists()) {
-                throw new Error("Dokumen bon harian tidak ditemukan.");
-            }
-            const bonData = bonDoc.data() as DailyBon;
-
-            // Delete the bon document
-            transaction.delete(bonRef);
-
-            // If the deleted bon had deducted stock, restock it
-            const wasStockDeducted = bonData.status_bon === 'RECEIVED' || bonData.status_bon === 'KMP';
-            if (wasStockDeducted) {
-                await updateInventoryForBon(transaction, firestore, bonData, +bonData.qty_dailybon);
-            }
-        });
-        
-        toast({ title: "Sukses", description: "Bon harian telah dihapus dan stok telah dikembalikan (jika perlu)." });
-
+      await deleteDoc(doc(firestore, 'daily_bon', selectedBon.id));
+      toast({ title: "Sukses", description: "Bon harian telah dihapus." });
     } catch (error: any) {
         console.error("Error deleting document: ", error);
         toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menghapus bon harian." });
@@ -321,22 +259,33 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
           keterangan: values.keterangan
         });
 
-        // 2. Calculate stock change
-        const wasStockDeducted = originalStatus === 'RECEIVED' || originalStatus === 'KMP';
-        const willStockBeDeducted = newStatus === 'RECEIVED' || newStatus === 'KMP';
+        // 2. Check if stock needs to be deducted
+        const stockShouldBeDeducted = (newStatus === 'RECEIVED' || newStatus === 'KMP');
+        const stockWasNotDeducted = (originalStatus !== 'RECEIVED' && originalStatus !== 'KMP');
 
-        let stockChange = 0;
-        if (willStockBeDeducted && !wasStockDeducted) {
-            // Moving to a stock-deducted state (e.g., BON -> RECEIVED)
-            stockChange = -originalBon.qty_dailybon;
-        } else if (!willStockBeDeducted && wasStockDeducted) {
-            // Moving away from a stock-deducted state (e.g., RECEIVED -> CANCELED)
-            stockChange = +originalBon.qty_dailybon;
-        }
+        if (stockShouldBeDeducted && stockWasNotDeducted) {
+            const inventoryCol = collection(firestore, 'inventory');
+            const q = query(inventoryCol, where("part", "==", originalBon.part));
+            const inventorySnapshot = await transaction.get(q);
 
-        // 3. Apply stock change if necessary
-        if (stockChange !== 0) {
-            await updateInventoryForBon(transaction, firestore, originalBon, stockChange);
+            if (inventorySnapshot.empty) {
+                throw new Error(`Part ${originalBon.part} tidak ditemukan di Report Stock.`);
+            }
+
+            const inventoryDoc = inventorySnapshot.docs[0];
+            const inventoryRef = inventoryDoc.ref;
+            const currentInventory = inventoryDoc.data() as InventoryItem;
+            
+            const newQtyBaik = currentInventory.qty_baik - originalBon.qty_dailybon;
+            if (newQtyBaik < 0) {
+                throw new Error(`Stok 'baik' untuk part ${originalBon.part} tidak mencukupi.`);
+            }
+            const newAvailableQty = currentInventory.available_qty - originalBon.qty_dailybon;
+            
+            transaction.update(inventoryRef, {
+                qty_baik: newQtyBaik,
+                available_qty: newAvailableQty,
+            });
         }
       });
 

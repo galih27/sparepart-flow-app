@@ -75,65 +75,6 @@ const formSchema = z.object({
 
 const ITEMS_PER_PAGE = 10;
 
-/**
- * Updates the inventory based on an MSK transaction.
- * @param transaction - The Firestore transaction.
- * @param firestore - The Firestore instance.
- * @param msk - The MSK data.
- * @param change - The stock change amount (+qty for addition, -qty for reversal).
- */
-async function updateInventoryForMsk(transaction: Transaction, firestore: any, msk: Omit<Msk, 'id' | 'harga'>, change: number) {
-    if (change === 0) return;
-
-    const inventoryCol = collection(firestore, 'inventory');
-    const q = query(inventoryCol, where("part", "==", msk.part));
-    const inventorySnapshot = await transaction.get(q);
-
-    if (inventorySnapshot.empty) {
-        if (change > 0) {
-            // Part doesn't exist, create a new inventory item.
-            const newInventoryRef = doc(inventoryCol);
-            const newInventoryItem: Omit<InventoryItem, 'id'> = {
-                part: msk.part,
-                deskripsi: msk.deskripsi,
-                qty_baik: change,
-                available_qty: change,
-                qty_rusak: 0,
-                qty_real: change,
-                harga_dpp: 0, // Should be updated later if possible
-                ppn: 0,
-                total_harga: 0,
-                lokasi: 'BARU',
-                satuan: 'pcs',
-                return_to_factory: 0,
-            };
-            transaction.set(newInventoryRef, newInventoryItem);
-        } else {
-            // Trying to reverse stock for a non-existent part, which is an error.
-            throw new Error(`Part ${msk.part} tidak ditemukan di Report Stock untuk mengurangi stok.`);
-        }
-    } else {
-        // Part exists, update it.
-        const inventoryDoc = inventorySnapshot.docs[0];
-        const inventoryRef = inventoryDoc.ref;
-        const currentInventory = inventoryDoc.data() as InventoryItem;
-
-        const newQtyBaik = currentInventory.qty_baik + change;
-        if (newQtyBaik < 0) {
-            throw new Error(`Stok 'baik' untuk part ${msk.part} menjadi negatif.`);
-        }
-        const newAvailableQty = currentInventory.available_qty + change;
-        const newQtyReal = newQtyBaik + currentInventory.qty_rusak;
-
-        transaction.update(inventoryRef, {
-            qty_baik: newQtyBaik,
-            available_qty: newAvailableQty,
-            qty_real: newQtyReal,
-        });
-    }
-}
-
-
 export default function MskClient() {
   const { toast } = useToast();
   const firestore = useFirestore();
@@ -241,24 +182,8 @@ export default function MskClient() {
   const confirmDelete = async () => {
     if (!selectedMsk || !selectedMsk.id || !firestore) return;
     try {
-        await runTransaction(firestore, async (transaction) => {
-            const mskRef = doc(firestore, 'msk', selectedMsk.id!);
-            const mskDoc = await transaction.get(mskRef);
-            if (!mskDoc.exists()) {
-                throw new Error("Dokumen MSK tidak ditemukan.");
-            }
-            const mskData = mskDoc.data() as Msk;
-
-            transaction.delete(mskRef);
-
-            const wasStockAdded = mskData.status_msk === 'RECEIVED';
-            if (wasStockAdded) {
-                await updateInventoryForMsk(transaction, firestore, mskData, -mskData.qty_msk);
-            }
-        });
-        
-        toast({ title: "Sukses", description: "Data MSK telah dihapus dan stok telah dikembalikan (jika perlu)." });
-
+      await deleteDoc(doc(firestore, 'msk', selectedMsk.id));
+      toast({ title: "Sukses", description: "Data MSK telah dihapus." });
     } catch (error: any) {
       console.error("Error deleting document: ", error);
       toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menghapus data MSK." });
@@ -274,47 +199,20 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
     const isEditing = !!selectedMsk?.id;
 
     try {
-        await runTransaction(firestore, async (transaction) => {
-            const mskDataForStockLogic: Omit<Msk, 'id'> & { id?: string } = {
-                ...values,
-                tanggal_msk: isEditing ? selectedMsk.tanggal_msk : new Date().toISOString().split('T')[0],
-            };
+        const mskDataForStockLogic: Omit<Msk, 'id'> & { id?: string } = {
+            ...values,
+            tanggal_msk: isEditing ? selectedMsk.tanggal_msk : new Date().toISOString().split('T')[0],
+        };
 
-            if (isEditing) {
-                const mskRef = doc(firestore, 'msk', selectedMsk.id!);
-                const originalMskDoc = await transaction.get(mskRef);
-                if (!originalMskDoc.exists()) throw new Error("Dokumen MSK tidak ditemukan.");
-                const originalMsk = originalMskDoc.data() as Msk;
-                
-                transaction.update(mskRef, { ...values });
+        if (isEditing) {
+            const mskRef = doc(firestore, 'msk', selectedMsk.id!);
+            await updateDoc(mskRef, { ...values });
+        } else { // Adding new MSK
+            const newMskRef = doc(collection(firestore, 'msk'));
+            await addDoc(collection(firestore, 'msk'), mskDataForStockLogic);
+        }
 
-                const wasStockAdded = originalMsk.status_msk === 'RECEIVED';
-                const willStockBeAdded = values.status_msk === 'RECEIVED';
-
-                let stockChange = 0;
-                if (willStockBeAdded && !wasStockAdded) {
-                    stockChange = values.qty_msk; // Add new quantity
-                } else if (!willStockBeAdded && wasStockAdded) {
-                    stockChange = -originalMsk.qty_msk; // Reverse old quantity
-                } else if (willStockBeAdded && wasStockAdded && values.qty_msk !== originalMsk.qty_msk) {
-                    stockChange = values.qty_msk - originalMsk.qty_msk; // Adjust quantity difference
-                }
-
-                if (stockChange !== 0) {
-                   await updateInventoryForMsk(transaction, firestore, mskDataForStockLogic, stockChange);
-                }
-
-            } else { // Adding new MSK
-                const newMskRef = doc(collection(firestore, 'msk'));
-                transaction.set(newMskRef, mskDataForStockLogic);
-                
-                if (values.status_msk === 'RECEIVED') {
-                    await updateInventoryForMsk(transaction, firestore, mskDataForStockLogic, values.qty_msk);
-                }
-            }
-        });
-
-        toast({ title: "Sukses", description: `Data MSK berhasil ${isEditing ? 'diperbarui' : 'ditambahkan'} dan stok telah disesuaikan.` });
+        toast({ title: "Sukses", description: `Data MSK berhasil ${isEditing ? 'diperbarui' : 'ditambahkan'}.` });
         if (isEditing) setIsEditModalOpen(false);
         else setIsAddModalOpen(false);
         setSelectedMsk(null);
