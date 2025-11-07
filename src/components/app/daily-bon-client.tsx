@@ -46,6 +46,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
 
 const addSchema = z.object({
   part: z.string().min(1, "Part wajib diisi"),
