@@ -14,43 +14,50 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Warehouse } from "lucide-react";
-import { usersData } from "@/lib/data";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/firebase";
+import { signInWithEmailAndPassword } from "firebase/auth";
 
 export default function LoginPage() {
   const router = useRouter();
+  const auth = useAuth();
   const { toast } = useToast();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      const user = usersData.find(
-        (u) =>
-          (u.users === username || u.nik === username || u.email === username) &&
-          u.password === password
-      );
+    if (!auth) {
+      toast({
+        variant: "destructive",
+        title: "Login Gagal",
+        description: "Layanan otentikasi tidak tersedia.",
+      });
+      setIsLoading(false);
+      return;
+    }
 
-      if (user) {
-        toast({
-          title: "Login Berhasil",
-          description: `Selamat datang kembali, ${user.nama_teknisi}!`,
-        });
-        router.push(`/`);
-      } else {
-        toast({
-          variant: "destructive",
-          title: "Login Gagal",
-          description: "Username atau password salah. Silakan coba lagi.",
-        });
-        setIsLoading(false);
-      }
-    }, 1000);
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      
+      toast({
+        title: "Login Berhasil",
+        description: `Selamat datang kembali!`,
+      });
+      router.push(`/`);
+
+    } catch (error: any) {
+       toast({
+        variant: "destructive",
+        title: "Login Gagal",
+        description: "Email atau password salah. Silakan coba lagi.",
+      });
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -71,14 +78,14 @@ export default function LoginPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username">User/NIK/Email</Label>
+                <Label htmlFor="email">Email</Label>
                 <Input
-                  id="username"
-                  type="text"
-                  placeholder="admin"
+                  id="email"
+                  type="email"
+                  placeholder="admin@example.com"
                   required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   disabled={isLoading}
                 />
               </div>
