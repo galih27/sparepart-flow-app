@@ -4,12 +4,36 @@ import {
   onSnapshot,
   Query,
   DocumentData,
+  getDocs,
 } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 export const useCollection = <T>(q: Query<DocumentData> | null) => {
   const [data, setData] = useState<T[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const fetchData = useCallback(async () => {
+    if (!q) {
+      setData([]);
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+        const querySnapshot = await getDocs(q);
+        const data: T[] = [];
+        querySnapshot.forEach((doc) => {
+            data.push({ id: doc.id, ...doc.data() } as T);
+        });
+        setData(data);
+    } catch (error) {
+        console.error("Error fetching collection:", error);
+        setData([]);
+    } finally {
+        setIsLoading(false);
+    }
+  }, [q]);
+
 
   useEffect(() => {
     if (!q) {
@@ -18,6 +42,7 @@ export const useCollection = <T>(q: Query<DocumentData> | null) => {
       return;
     }
 
+    setIsLoading(true);
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const data: T[] = [];
       querySnapshot.forEach((doc) => {
@@ -25,10 +50,20 @@ export const useCollection = <T>(q: Query<DocumentData> | null) => {
       });
       setData(data);
       setIsLoading(false);
+    }, (error) => {
+        console.error("Error with snapshot listener: ", error);
+        setIsLoading(false);
     });
 
     return () => unsubscribe();
   }, [q]);
 
-  return { data, isLoading };
+  const refetch = useCallback(() => {
+      setIsLoading(true);
+      return fetchData();
+  }, [fetchData]);
+
+  return { data, isLoading, refetch };
 };
+
+    

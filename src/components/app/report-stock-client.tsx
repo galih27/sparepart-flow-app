@@ -9,7 +9,7 @@ import { Eye, FileDown, FileUp, Pencil, Search, Trash2 } from 'lucide-react';
 import type { InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
-import { collection, doc, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
+import { collection, doc, updateDoc, writeBatch, deleteDoc, getDocs } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 
 import PageHeader from '@/components/app/page-header';
@@ -77,13 +77,14 @@ export default function ReportStockClient() {
     return collection(firestore, 'inventory');
   }, [firestore]);
   
-  const { data: initialData, isLoading: isLoadingInventory } = useCollection<InventoryItem>(inventoryQuery);
+  const { data: initialData, isLoading: isLoadingInventory, refetch } = useCollection<InventoryItem>(inventoryQuery);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
@@ -139,6 +140,7 @@ export default function ReportStockClient() {
     try {
       await deleteDoc(doc(firestore, 'inventory', selectedItem.id));
       toast({ title: "Sukses", description: `Item ${selectedItem.part} telah dihapus.` });
+      await refetch();
     } catch (error) {
        console.error("Error deleting document: ", error);
        toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus item." });
@@ -147,6 +149,27 @@ export default function ReportStockClient() {
       setSelectedItem(null);
     }
   };
+
+  const confirmDeleteAll = async () => {
+    if (!firestore || !inventoryQuery) return;
+    setIsDeletingAll(false); // Close dialog immediately
+    toast({ title: "Menghapus Semua Data", description: "Proses ini mungkin memerlukan beberapa saat..." });
+
+    try {
+        const querySnapshot = await getDocs(inventoryQuery);
+        const batch = writeBatch(firestore);
+        querySnapshot.forEach((doc) => {
+            batch.delete(doc.ref);
+        });
+        await batch.commit();
+        toast({ title: "Sukses", description: "Semua data report stock telah dihapus." });
+        await refetch();
+    } catch (error) {
+        console.error("Error deleting all documents: ", error);
+        toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus semua data report stock." });
+    }
+  };
+
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
@@ -172,16 +195,12 @@ export default function ReportStockClient() {
             throw new Error("Koneksi Firestore tidak tersedia.");
         }
 
-        // Basic validation
         if (json.length > 0 && !json[0].hasOwnProperty('part')) {
             throw new Error("Format file Excel tidak sesuai. Pastikan ada kolom 'part'.");
         }
 
         const batch = writeBatch(firestore);
         json.forEach((row) => {
-          // Find existing doc to update or create a new one.
-          // For this app, we assume new import clears and replaces, so we just add.
-          // A more robust solution would be to check for existing `part` number.
           const docRef = doc(collection(firestore, "inventory")); 
           const inventoryItem: Omit<InventoryItem, 'id'> = {
             part: row.part || '',
@@ -202,13 +221,13 @@ export default function ReportStockClient() {
 
         await batch.commit();
         toast({ title: "Sukses", description: `${json.length} data inventaris berhasil diimpor.` });
+        await refetch();
 
       } catch (error: any) {
         console.error("Error importing data: ", error);
         toast({ variant: "destructive", title: "Gagal Impor", description: error.message || "Terjadi kesalahan saat mengimpor data." });
       } finally {
         setIsImporting(false);
-        // Reset file input
         if(fileInputRef.current) fileInputRef.current.value = "";
       }
     };
@@ -253,6 +272,7 @@ export default function ReportStockClient() {
       toast({ title: "Sukses", description: "Data stok berhasil diperbarui." });
       setIsModalOpen(false);
       setIsEditing(false);
+      await refetch();
     } catch (error) {
       console.error("Error updating document: ", error);
       toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui data stok." });
@@ -295,10 +315,15 @@ export default function ReportStockClient() {
                     <Button variant="outline" onClick={handleImportClick} disabled={isImporting}>
                         <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Upload Excel'}
                     </Button>
-                    <Button onClick={handleExport} disabled={isExporting}>
-                        <FileDown className="mr-2" /> {isExporting ? 'Mengekspor...' : 'Export Excel'}
-                    </Button>
                 </>
+            )}
+            <Button onClick={handleExport} disabled={isExporting}>
+                <FileDown className="mr-2" /> {isExporting ? 'Mengekspor...' : 'Export Excel'}
+            </Button>
+             {permissions?.reportstock_delete && (
+                <Button variant="destructive" onClick={() => setIsDeletingAll(true)} disabled={isLoading || !initialData || initialData.length === 0}>
+                    <Trash2 className="mr-2" /> Hapus Semua
+                </Button>
             )}
         </div>
       </PageHeader>
@@ -342,7 +367,7 @@ export default function ReportStockClient() {
                 paginatedData.map(item => (
                   <TableRow key={item.id}>
                     <TableCell>
-                      <div className="flex gap-2">
+                      <div className="flex gap-0">
                         <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -389,6 +414,22 @@ export default function ReportStockClient() {
           <AlertDialogFooter>
             <AlertDialogCancel>Batal</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">Hapus</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete All Confirmation Dialog */}
+      <AlertDialog open={isDeletingAll} onOpenChange={setIsDeletingAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus Semua Data Report Stock?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tindakan ini akan menghapus <strong>SEMUA</strong> item inventaris secara permanen. Data yang dihapus tidak dapat dipulihkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteAll} className="bg-destructive hover:bg-destructive/90">Ya, Hapus Semua</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -481,3 +522,5 @@ export default function ReportStockClient() {
     </>
   );
 }
+
+    
