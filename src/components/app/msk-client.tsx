@@ -152,7 +152,7 @@ export default function MskClient() {
   };
   
   const handleEdit = (msk: Msk) => {
-    if (permissions?.msk_edit) {
+    if (currentUser?.role === 'Admin' || currentUser?.role === 'Manager') {
         setSelectedMsk(msk);
         form.reset({
             part: msk.part,
@@ -197,22 +197,63 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
     if (!firestore) return;
     
     const isEditing = !!selectedMsk?.id;
+    const mskToSave = { ...values };
 
     try {
-        const mskDataForStockLogic: Omit<Msk, 'id'> & { id?: string } = {
-            ...values,
-            tanggal_msk: isEditing ? selectedMsk.tanggal_msk : new Date().toISOString().split('T')[0],
-        };
+        await runTransaction(firestore, async (transaction) => {
+            let mskRef;
+            let originalStatus: Msk['status_msk'] | undefined = undefined;
 
-        if (isEditing) {
-            const mskRef = doc(firestore, 'msk', selectedMsk.id!);
-            await updateDoc(mskRef, { ...values });
-        } else { // Adding new MSK
-            const newMskRef = doc(collection(firestore, 'msk'));
-            await addDoc(collection(firestore, 'msk'), mskDataForStockLogic);
-        }
+            if (isEditing) {
+                if (!selectedMsk?.id) throw new Error("ID MSK tidak ditemukan untuk diedit.");
+                mskRef = doc(firestore, 'msk', selectedMsk.id);
+                const mskDoc = await transaction.get(mskRef);
+                if (!mskDoc.exists()) throw new Error("Dokumen MSK tidak ditemukan.");
+                originalStatus = mskDoc.data().status_msk;
+                transaction.update(mskRef, mskToSave);
+            } else {
+                mskRef = doc(collection(firestore, 'msk'));
+                const newMskData = {
+                    ...mskToSave,
+                    tanggal_msk: new Date().toISOString().split('T')[0],
+                };
+                transaction.set(mskRef, newMskData);
+            }
+            
+            const inventoryQueryTx = query(collection(firestore, 'inventory'), where("part", "==", values.part));
+            const inventorySnapshot = await getDocs(inventoryQueryTx); // Use getDocs, not transaction.get for query
+            const inventoryDoc = inventorySnapshot.docs[0];
+            const inventoryRef = inventoryDoc ? inventoryDoc.ref : null;
+            const currentInventory = inventoryDoc ? inventoryDoc.data() as InventoryItem : null;
 
-        toast({ title: "Sukses", description: `Data MSK berhasil ${isEditing ? 'diperbarui' : 'ditambahkan'}.` });
+            const wasReceived = originalStatus === 'RECEIVED';
+            const isNowReceived = values.status_msk === 'RECEIVED';
+
+            // Logic to add stock
+            if (isNowReceived && !wasReceived) {
+                if (!inventoryRef || !currentInventory) {
+                     throw new Error(`Part ${values.part} tidak ditemukan di Report Stock. Tidak dapat menambahkan stok.`);
+                }
+                const newQtyBaik = currentInventory.qty_baik + values.qty_msk;
+                const newAvailableQty = currentInventory.available_qty + values.qty_msk;
+                transaction.update(inventoryRef, { qty_baik: newQtyBaik, available_qty: newAvailableQty });
+            }
+            // Logic to revert stock addition
+            else if (!isNowReceived && wasReceived) {
+                 if (!inventoryRef || !currentInventory) {
+                     throw new Error(`Part ${values.part} tidak ditemukan di Report Stock. Tidak dapat mengembalikan stok.`);
+                }
+                const newQtyBaik = currentInventory.qty_baik - values.qty_msk;
+                if (newQtyBaik < 0) {
+                  // This case should be handled carefully, maybe prevent this state change
+                  console.warn(`Mengembalikan stok untuk part ${values.part} akan menghasilkan kuantitas negatif.`);
+                }
+                const newAvailableQty = currentInventory.available_qty - values.qty_msk;
+                transaction.update(inventoryRef, { qty_baik: newQtyBaik, available_qty: newAvailableQty });
+            }
+        });
+
+        toast({ title: "Sukses", description: `Data MSK berhasil ${isEditing ? 'diperbarui' : 'ditambahkan'} dan stok disesuaikan.` });
         if (isEditing) setIsEditModalOpen(false);
         else setIsAddModalOpen(false);
         setSelectedMsk(null);
@@ -238,7 +279,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
   const permissions = currentUser?.permissions;
 
   const renderActionCell = (item: Msk) => {
-    const canEdit = permissions?.msk_edit;
+    const canEdit = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
     const canDelete = permissions?.msk_delete;
 
     return (
@@ -331,7 +372,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                 }}
               />
             </div>
-          {permissions?.msk_edit && (
+          {(currentUser?.role === 'Admin' || currentUser?.role === 'Manager') && (
             <Button onClick={() => {
               form.reset({
                 part: "",
