@@ -143,10 +143,11 @@ export default function DailyBonClient() {
   const filteredData = useMemo(() => {
     if (!data) return [];
     let bonData = data;
-    // Teknisi can only see their own bon
+    
     if (currentUser?.role === 'Teknisi') {
         bonData = data.filter(item => item.teknisi === currentUser.nama_teknisi);
     }
+
     return bonData.filter(item =>
       (filterTeknisi === '' || item.teknisi === filterTeknisi) &&
       (filterStatus === '' || item.status_bon === filterStatus)
@@ -291,33 +292,31 @@ export default function DailyBonClient() {
       <PageHeader title="Daily Bon">
         <div className="flex items-center gap-2">
            {currentUser?.role !== 'Teknisi' && (
-            <>
-                <Select value={filterTeknisi} onValueChange={(value) => {setFilterTeknisi(value === 'all' ? '' : value); setCurrentPage(1);}}>
-                    <SelectTrigger className="w-[180px] bg-background">
-                        <SelectValue placeholder="Filter Teknisi" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">Semua Teknisi</SelectItem>
-                        {users?.filter(u => u.role === 'Teknisi').map(user => (
-                            <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
-                        ))}
-                    </SelectContent>
-                    </Select>
-
-                    <Select value={filterStatus} onValueChange={(value) => {setFilterStatus(value === 'all' ? '' : value); setCurrentPage(1);}}>
-                    <SelectTrigger className="w-[180px] bg-background">
-                        <SelectValue placeholder="Filter Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">Semua Status</SelectItem>
-                        <SelectItem value="BON">BON</SelectItem>
-                        <SelectItem value="RECEIVED">RECEIVED</SelectItem>
-                        <SelectItem value="KMP">KMP</SelectItem>
-                        <SelectItem value="CANCELED">CANCELED</SelectItem>
-                    </SelectContent>
-                </Select>
-            </>
+            <Select value={filterTeknisi} onValueChange={(value) => {setFilterTeknisi(value === 'all' ? '' : value); setCurrentPage(1);}}>
+                <SelectTrigger className="w-[180px] bg-background">
+                    <SelectValue placeholder="Filter Teknisi" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Semua Teknisi</SelectItem>
+                    {users?.filter(u => u.role === 'Teknisi').map(user => (
+                        <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
            )}
+
+            <Select value={filterStatus} onValueChange={(value) => {setFilterStatus(value === 'all' ? '' : value); setCurrentPage(1);}}>
+              <SelectTrigger className="w-[180px] bg-background">
+                  <SelectValue placeholder="Filter Status" />
+              </SelectTrigger>
+              <SelectContent>
+                  <SelectItem value="all">Semua Status</SelectItem>
+                  <SelectItem value="BON">BON</SelectItem>
+                  <SelectItem value="RECEIVED">RECEIVED</SelectItem>
+                  <SelectItem value="KMP">KMP</SelectItem>
+                  <SelectItem value="CANCELED">CANCELED</SelectItem>
+              </SelectContent>
+            </Select>
 
           {permissions?.dailybon_edit && (
             <Button onClick={() => setIsAddModalOpen(true)}>
@@ -642,3 +641,5 @@ export default function DailyBonClient() {
     </>
   );
 }
+
+    
