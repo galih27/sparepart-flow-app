@@ -8,7 +8,9 @@ import { Eye, FileDown, FileUp, Pencil, Search } from 'lucide-react';
 import type { InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore } from '@/firebase';
-import { collection, doc, updateDoc } from 'firebase/firestore';
+import { collection, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { inventoryData as mockInventory } from '@/lib/inventory-mock';
+
 
 import PageHeader from '@/components/app/page-header';
 import { Input } from '@/components/ui/input';
@@ -62,6 +64,7 @@ export default function ReportStockClient() {
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
   const form = useForm<z.infer<typeof editSchema>>({
@@ -93,6 +96,34 @@ export default function ReportStockClient() {
 
   const handleEdit = () => {
     setIsEditing(true);
+  };
+
+  const handleImport = async () => {
+    if (!firestore) {
+      toast({ variant: "destructive", title: "Gagal", description: "Koneksi Firestore tidak tersedia." });
+      return;
+    }
+    if (initialData && initialData.length > 0) {
+      toast({ variant: "destructive", title: "Gagal", description: "Data inventaris sudah ada. Hapus data lama untuk mengimpor." });
+      return;
+    }
+    setIsImporting(true);
+    toast({ title: "Mengimpor Data", description: "Mohon tunggu, data sedang diimpor ke Firestore..." });
+
+    try {
+      const batch = writeBatch(firestore);
+      mockInventory.forEach((item) => {
+        const docRef = doc(collection(firestore, "inventory"));
+        batch.set(docRef, item);
+      });
+      await batch.commit();
+      toast({ title: "Sukses", description: `${mockInventory.length} data inventaris berhasil diimpor.` });
+    } catch (error) {
+      console.error("Error importing data: ", error);
+      toast({ variant: "destructive", title: "Gagal Impor", description: "Terjadi kesalahan saat mengimpor data." });
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   async function onSubmit(values: z.infer<typeof editSchema>) {
@@ -135,7 +166,9 @@ export default function ReportStockClient() {
             }}
           />
         </div>
-        <Button variant="outline"><FileUp className="mr-2" /> Import</Button>
+        <Button variant="outline" onClick={handleImport} disabled={isImporting}>
+          <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Import'}
+        </Button>
         <Button><FileDown className="mr-2" /> Export</Button>
       </PageHeader>
 
@@ -171,7 +204,7 @@ export default function ReportStockClient() {
               ) : paginatedData.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center h-24">
-                    Tidak ada data. Coba unggah beberapa data inventaris.
+                    Tidak ada data. Klik tombol 'Import' untuk mengisi data inventaris awal.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -194,7 +227,7 @@ export default function ReportStockClient() {
               )}
             </TableBody>
           </Table>
-          {!isLoading && (
+          {!isLoading && paginatedData.length > 0 && (
             <DataTablePagination
               currentPage={currentPage}
               totalPages={totalPages}
