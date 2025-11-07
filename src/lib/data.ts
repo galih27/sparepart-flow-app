@@ -1,28 +1,6 @@
-import type { InventoryItem, User, DailyBon, BonPDS, Msk } from './definitions';
+import type { User, DailyBon, BonPDS, Msk } from './definitions';
+import { inventoryData as mockInventory } from './inventory-mock';
 
-export const inventoryData: InventoryItem[] = Array.from({ length: 50 }, (_, i) => {
-  const id = i + 1;
-  const partNumber = `PN-00${id}`;
-  const dpp = (Math.random() * 500000) + 50000;
-  const ppn = dpp * 0.11;
-  const qty_baik = Math.floor(Math.random() * 100);
-  const qty_rusak = Math.floor(Math.random() * 10);
-  return {
-    id_inventory: `inv-${id}`,
-    part: partNumber,
-    deskripsi: `Deskripsi untuk ${partNumber}`,
-    harga_dpp: dpp,
-    ppn: ppn,
-    total_harga: dpp + ppn,
-    satuan: 'pcs',
-    available_qty: qty_baik + qty_rusak,
-    qty_baik: qty_baik,
-    qty_rusak: qty_rusak,
-    lokasi: `Rak ${String.fromCharCode(65 + (i % 5))}-${Math.ceil((i+1)/5)}`,
-    return_to_factory: Math.floor(Math.random() * 5),
-    qty_real: qty_baik + qty_rusak,
-  };
-});
 
 export const usersData: User[] = [
   { id_user: 'user-1', users: 'admin', nik: '11111', nama_teknisi: 'Admin Utama', email: 'admin@example.com', password: 'password', role: 'Admin' },
@@ -34,7 +12,7 @@ export const usersData: User[] = [
 
 export const dailyBonData: DailyBon[] = Array.from({ length: 30 }, (_, i) => {
   const id = i + 1;
-  const item = inventoryData[i % inventoryData.length];
+  const item = mockInventory[i % mockInventory.length];
   const teknisi = usersData[(i % 3) + 1];
   return {
     id_dailybon: `db-${id}`,
@@ -52,7 +30,7 @@ export const dailyBonData: DailyBon[] = Array.from({ length: 30 }, (_, i) => {
 
 export const bonPdsData: BonPDS[] = Array.from({ length: 20 }, (_, i) => {
   const id = i + 1;
-  const item = inventoryData[(i + 10) % inventoryData.length];
+  const item = mockInventory[(i + 10) % mockInventory.length];
   return {
     id_bonpds: `pds-${id}`,
     part: item.part,
@@ -68,7 +46,7 @@ export const bonPdsData: BonPDS[] = Array.from({ length: 20 }, (_, i) => {
 
 export const mskData: Msk[] = Array.from({ length: 15 }, (_, i) => {
   const id = i + 1;
-  const item = inventoryData[(i + 20) % inventoryData.length];
+  const item = mockInventory[(i + 20) % mockInventory.length];
   return {
     id_msk: `msk-${id}`,
     part: item.part,

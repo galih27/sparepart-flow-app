@@ -1,4 +1,5 @@
 export type InventoryItem = {
+  id?: string; // ID from Firestore
   id_inventory: string;
   part: string;
   deskripsi: string;
@@ -15,6 +16,7 @@ export type InventoryItem = {
 };
 
 export type User = {
+  id?: string; // ID from Firestore
   id_user: string;
   users: string;
   nik: string;
@@ -25,6 +27,7 @@ export type User = {
 };
 
 export type DailyBon = {
+  id?: string; // ID from Firestore
   id_dailybon: string;
   part: string;
   deskripsi: string;
@@ -38,6 +41,7 @@ export type DailyBon = {
 };
 
 export type BonPDS = {
+  id?: string; // ID from Firestore
   id_bonpds: string;
   part: string;
   deskripsi: string;
@@ -50,6 +54,7 @@ export type BonPDS = {
 };
 
 export type Msk = {
+  id?: string; // ID from Firestore
   id_msk: string;
   part: string;
   deskripsi: string;

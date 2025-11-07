@@ -7,6 +7,8 @@ import * as z from "zod";
 import { Eye, FileDown, FileUp, Pencil, Search } from 'lucide-react';
 import type { InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
+import { useCollection, useFirestore } from '@/firebase';
+import { collection, doc, updateDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Input } from '@/components/ui/input';
@@ -37,6 +39,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Skeleton } from '../ui/skeleton';
 
 const editSchema = z.object({
   qty_baik: z.coerce.number().min(0, "Kuantitas tidak boleh negatif"),
@@ -45,9 +48,16 @@ const editSchema = z.object({
 
 const ITEMS_PER_PAGE = 10;
 
-export default function ReportStockClient({ data: initialData }: { data: InventoryItem[] }) {
+export default function ReportStockClient() {
   const { toast } = useToast();
-  const [data, setData] = useState<InventoryItem[]>(initialData);
+  const firestore = useFirestore();
+  const inventoryQuery = useMemo(() => {
+    if (!firestore) return null;
+    return collection(firestore, 'inventory');
+  }, [firestore]);
+  
+  const { data: initialData, isLoading } = useCollection<InventoryItem>(inventoryQuery);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -59,11 +69,12 @@ export default function ReportStockClient({ data: initialData }: { data: Invento
   });
 
   const filteredData = useMemo(() => {
-    return data.filter(item =>
+    if (!initialData) return [];
+    return initialData.filter(item =>
       item.part.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.deskripsi.toLowerCase().includes(searchTerm.toLowerCase())
     );
-  }, [data, searchTerm]);
+  }, [initialData, searchTerm]);
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedData = useMemo(() => {
@@ -84,19 +95,24 @@ export default function ReportStockClient({ data: initialData }: { data: Invento
     setIsEditing(true);
   };
 
-  function onSubmit(values: z.infer<typeof editSchema>) {
-    if (!selectedItem) return;
+  async function onSubmit(values: z.infer<typeof editSchema>) {
+    if (!selectedItem || !selectedItem.id || !firestore) return;
 
-    setData(prevData =>
-      prevData.map(item =>
-        item.id_inventory === selectedItem.id_inventory
-          ? { ...item, ...values, available_qty: values.qty_baik + values.qty_rusak, qty_real: values.qty_baik + values.qty_rusak }
-          : item
-      )
-    );
-    toast({ title: "Sukses", description: "Data stok berhasil diperbarui." });
-    setIsModalOpen(false);
-    setIsEditing(false);
+    const itemRef = doc(firestore, 'inventory', selectedItem.id);
+    
+    try {
+      await updateDoc(itemRef, {
+        ...values,
+        available_qty: values.qty_baik + values.qty_rusak,
+        qty_real: values.qty_baik + values.qty_rusak,
+      });
+      toast({ title: "Sukses", description: "Data stok berhasil diperbarui." });
+      setIsModalOpen(false);
+      setIsEditing(false);
+    } catch (error) {
+      console.error("Error updating document: ", error);
+      toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui data stok." });
+    }
   }
 
   const formatCurrency = (value: number) => {
@@ -139,31 +155,54 @@ export default function ReportStockClient({ data: initialData }: { data: Invento
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paginatedData.map(item => (
-                <TableRow key={item.id_inventory}>
-                  <TableCell>
-                    <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
+              {isLoading ? (
+                Array.from({ length: 5 }).map((_, index) => (
+                  <TableRow key={index}>
+                    <TableCell><Skeleton className="h-8 w-8" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[200px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                  </TableRow>
+                ))
+              ) : paginatedData.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center h-24">
+                    Tidak ada data. Coba unggah beberapa data inventaris.
                   </TableCell>
-                  <TableCell>{item.part}</TableCell>
-                  <TableCell>{item.deskripsi}</TableCell>
-                  <TableCell>{formatCurrency(item.total_harga)}</TableCell>
-                  <TableCell>{item.available_qty}</TableCell>
-                  <TableCell>{item.qty_baik}</TableCell>
-                  <TableCell>{item.qty_rusak}</TableCell>
-                  <TableCell>{item.lokasi}</TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                paginatedData.map(item => (
+                  <TableRow key={item.id}>
+                    <TableCell>
+                      <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                    <TableCell>{item.part}</TableCell>
+                    <TableCell>{item.deskripsi}</TableCell>
+                    <TableCell>{formatCurrency(item.total_harga)}</TableCell>
+                    <TableCell>{item.available_qty}</TableCell>
+                    <TableCell>{item.qty_baik}</TableCell>
+                    <TableCell>{item.qty_rusak}</TableCell>
+                    <TableCell>{item.lokasi}</TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
-          <DataTablePagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={setCurrentPage}
-            canPreviousPage={currentPage > 1}
-            canNextPage={currentPage < totalPages}
-          />
+          {!isLoading && (
+            <DataTablePagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              canPreviousPage={currentPage > 1}
+              canNextPage={currentPage < totalPages}
+            />
+          )}
         </div>
       </div>
 
