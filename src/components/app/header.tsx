@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams, Suspense } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { PlaceHolderImages } from "@/lib/placeholder-images";
 import {
   LogOut,
