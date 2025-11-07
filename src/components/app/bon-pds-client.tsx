@@ -7,6 +7,8 @@ import * as z from "zod";
 import { Plus, Search } from 'lucide-react';
 import type { BonPDS, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
+import { useCollection, useFirestore } from '@/firebase';
+import { collection } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -52,8 +54,15 @@ const addSchema = z.object({
 
 const ITEMS_PER_PAGE = 10;
 
-export default function BonPdsClient({ data: initialData, inventory }: { data: BonPDS[], inventory: InventoryItem[] }) {
+export default function BonPdsClient({ data: initialData }: { data: BonPDS[] }) {
   const { toast } = useToast();
+  const firestore = useFirestore();
+  const inventoryQuery = useMemo(() => {
+    if (!firestore) return null;
+    return collection(firestore, 'inventory');
+  }, [firestore]);
+  const { data: inventory } = useCollection<InventoryItem>(inventoryQuery);
+
   const [data, setData] = useState<BonPDS[]>(initialData);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -74,13 +83,15 @@ export default function BonPdsClient({ data: initialData, inventory }: { data: B
   const watchedPart = useWatch({ control: form.control, name: "part" });
 
   useEffect(() => {
-    const inventoryItem = inventory.find(item => item.part.toLowerCase() === watchedPart.toLowerCase());
-    if (inventoryItem) {
-      form.setValue("deskripsi", inventoryItem.deskripsi);
-      form.setValue("harga", inventoryItem.total_harga);
-    } else {
-      form.setValue("deskripsi", "");
-      form.setValue("harga", 0);
+    if (inventory) {
+      const inventoryItem = inventory.find(item => item.part.toLowerCase() === watchedPart.toLowerCase());
+      if (inventoryItem) {
+        form.setValue("deskripsi", inventoryItem.deskripsi);
+        form.setValue("harga", inventoryItem.total_harga);
+      } else {
+        form.setValue("deskripsi", "");
+        form.setValue("harga", 0);
+      }
     }
   }, [watchedPart, inventory, form]);
 

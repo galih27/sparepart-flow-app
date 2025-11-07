@@ -7,6 +7,8 @@ import * as z from "zod";
 import { Plus } from 'lucide-react';
 import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
+import { useCollection, useFirestore } from '@/firebase';
+import { collection } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -59,8 +61,15 @@ const addSchema = z.object({
 
 const ITEMS_PER_PAGE = 10;
 
-export default function DailyBonClient({ data: initialData, users, inventory }: { data: DailyBon[], users: User[], inventory: InventoryItem[] }) {
+export default function DailyBonClient({ data: initialData, users }: { data: DailyBon[], users: User[] }) {
   const { toast } = useToast();
+  const firestore = useFirestore();
+  const inventoryQuery = useMemo(() => {
+    if (!firestore) return null;
+    return collection(firestore, 'inventory');
+  }, [firestore]);
+  const { data: inventory } = useCollection<InventoryItem>(inventoryQuery);
+  
   const [data, setData] = useState<DailyBon[]>(initialData);
   const [filterTeknisi, setFilterTeknisi] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -82,13 +91,15 @@ export default function DailyBonClient({ data: initialData, users, inventory }: 
   const watchedPart = useWatch({ control: form.control, name: "part" });
 
   useEffect(() => {
-    const inventoryItem = inventory.find(item => item.part.toLowerCase() === watchedPart.toLowerCase());
-    if (inventoryItem) {
-      form.setValue("deskripsi", inventoryItem.deskripsi);
-      form.setValue("harga", inventoryItem.total_harga);
-    } else {
-      form.setValue("deskripsi", "");
-      form.setValue("harga", 0);
+    if (inventory) {
+      const inventoryItem = inventory.find(item => item.part.toLowerCase() === watchedPart.toLowerCase());
+      if (inventoryItem) {
+        form.setValue("deskripsi", inventoryItem.deskripsi);
+        form.setValue("harga", inventoryItem.total_harga);
+      } else {
+        form.setValue("deskripsi", "");
+        form.setValue("harga", 0);
+      }
     }
   }, [watchedPart, inventory, form]);
 
