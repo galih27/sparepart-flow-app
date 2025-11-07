@@ -8,7 +8,7 @@ import { Plus } from 'lucide-react';
 import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore } from '@/firebase';
-import { collection } from 'firebase/firestore';
+import { collection, addDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '../ui/skeleton';
 
 const addSchema = z.object({
   part: z.string().min(1, "Part wajib diisi"),
@@ -61,16 +62,18 @@ const addSchema = z.object({
 
 const ITEMS_PER_PAGE = 10;
 
-export default function DailyBonClient({ data: initialData, users }: { data: DailyBon[], users: User[] }) {
+export default function DailyBonClient() {
   const { toast } = useToast();
   const firestore = useFirestore();
-  const inventoryQuery = useMemo(() => {
-    if (!firestore) return null;
-    return collection(firestore, 'inventory');
-  }, [firestore]);
-  const { data: inventory } = useCollection<InventoryItem>(inventoryQuery);
+
+  const bonQuery = useMemo(() => firestore ? collection(firestore, 'daily_bon') : null, [firestore]);
+  const usersQuery = useMemo(() => firestore ? collection(firestore, 'users') : null, [firestore]);
+  const inventoryQuery = useMemo(() => firestore ? collection(firestore, 'inventory') : null, [firestore]);
   
-  const [data, setData] = useState<DailyBon[]>(initialData);
+  const { data, isLoading: isLoadingData } = useCollection<DailyBon>(bonQuery);
+  const { data: users, isLoading: isLoadingUsers } = useCollection<User>(usersQuery);
+  const { data: inventory, isLoading: isLoadingInventory } = useCollection<InventoryItem>(inventoryQuery);
+  
   const [filterTeknisi, setFilterTeknisi] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -105,10 +108,14 @@ export default function DailyBonClient({ data: initialData, users }: { data: Dai
 
 
   const filteredData = useMemo(() => {
+    if (!data) return [];
     return data.filter(item =>
       (filterTeknisi === '' || item.teknisi === filterTeknisi) &&
       (filterStatus === '' || item.status_bon === filterStatus)
-    ).sort((a, b) => new Date(b.tanggal_dailybon).getTime() - new Date(a.tanggal_dailybon).getTime());
+    ).sort((a, b) => {
+        if (!a.tanggal_dailybon || !b.tanggal_dailybon) return 0;
+        return new Date(b.tanggal_dailybon).getTime() - new Date(a.tanggal_dailybon).getTime()
+    });
   }, [data, filterTeknisi, filterStatus]);
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -118,9 +125,9 @@ export default function DailyBonClient({ data: initialData, users }: { data: Dai
     return filteredData.slice(start, end);
   }, [filteredData, currentPage]);
   
-  function onSubmit(values: z.infer<typeof addSchema>) {
-    const newBon: DailyBon = {
-        id_dailybon: `db-${data.length + 1}`,
+  async function onSubmit(values: z.infer<typeof addSchema>) {
+    if (!firestore) return;
+    const newBon: Omit<DailyBon, 'id' | 'id_dailybon'> = {
         part: values.part,
         deskripsi: values.deskripsi,
         qty_dailybon: values.qty_dailybon,
@@ -128,14 +135,19 @@ export default function DailyBonClient({ data: initialData, users }: { data: Dai
         status_bon: 'BON',
         teknisi: values.teknisi,
         tanggal_dailybon: new Date().toISOString().split('T')[0],
-        no_tkl: `TKL-2024-${String(data.length + 1).padStart(4, '0')}`,
+        no_tkl: `TKL-2024-${String((data?.length || 0) + 1).padStart(4, '0')}`,
         keterangan: values.keterangan || '',
     };
     
-    setData(prevData => [newBon, ...prevData]);
-    toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan." });
-    setIsModalOpen(false);
-    form.reset();
+    try {
+        await addDoc(collection(firestore, 'daily_bon'), newBon);
+        toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan." });
+        setIsModalOpen(false);
+        form.reset();
+    } catch (error) {
+        console.error("Error adding document: ", error);
+        toast({ variant: "destructive", title: "Gagal", description: "Gagal menambahkan data bon harian." });
+    }
   }
 
   const formatCurrency = (value: number) => {
@@ -149,6 +161,8 @@ export default function DailyBonClient({ data: initialData, users }: { data: Dai
     'CANCELED': 'destructive'
   } as const;
 
+  const isLoading = isLoadingData || isLoadingUsers || isLoadingInventory;
+
   return (
     <>
       <PageHeader title="Daily Bon">
@@ -159,8 +173,8 @@ export default function DailyBonClient({ data: initialData, users }: { data: Dai
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Semua Teknisi</SelectItem>
-                {users.filter(u => u.role === 'Teknisi').map(user => (
-                    <SelectItem key={user.id_user} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
+                {users?.filter(u => u.role === 'Teknisi').map(user => (
+                    <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -201,8 +215,28 @@ export default function DailyBonClient({ data: initialData, users }: { data: Dai
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paginatedData.map(item => (
-                <TableRow key={item.id_dailybon}>
+              {isLoading ? (
+                 Array.from({ length: 5 }).map((_, index) => (
+                    <TableRow key={index}>
+                        <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-[80px] rounded-full" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                    </TableRow>
+                 ))
+              ) : paginatedData.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center h-24">
+                    Tidak ada data bon harian.
+                  </TableCell>
+                </TableRow>
+              ) : (paginatedData.map(item => (
+                <TableRow key={item.id}>
                   <TableCell className="font-medium">{item.part}</TableCell>
                   <TableCell>{item.deskripsi}</TableCell>
                   <TableCell>{item.qty_dailybon}</TableCell>
@@ -213,9 +247,10 @@ export default function DailyBonClient({ data: initialData, users }: { data: Dai
                   <TableCell>{item.no_tkl}</TableCell>
                   <TableCell>{item.keterangan}</TableCell>
                 </TableRow>
-              ))}
+              )))}
             </TableBody>
           </Table>
+           {!isLoading && paginatedData.length > 0 && (
           <DataTablePagination
             currentPage={currentPage}
             totalPages={totalPages}
@@ -223,6 +258,7 @@ export default function DailyBonClient({ data: initialData, users }: { data: Dai
             canPreviousPage={currentPage > 1}
             canNextPage={currentPage < totalPages}
           />
+          )}
         </div>
       </div>
 
@@ -303,8 +339,8 @@ export default function DailyBonClient({ data: initialData, users }: { data: Dai
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {users.filter(u => u.role === 'Teknisi').map(user => (
-                            <SelectItem key={user.id_user} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
+                        {users?.filter(u => u.role === 'Teknisi').map(user => (
+                            <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

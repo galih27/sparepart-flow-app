@@ -28,7 +28,6 @@ export type User = {
 
 export type DailyBon = {
   id?: string; // ID from Firestore
-  id_dailybon: string;
   part: string;
   deskripsi: string;
   qty_dailybon: number;
