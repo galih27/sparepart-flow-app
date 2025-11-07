@@ -142,12 +142,15 @@ export default function DailyBonClient() {
 
   const filteredData = useMemo(() => {
     if (!data) return [];
+    
     let bonData = data;
     
+    // If the user is a 'Teknisi', pre-filter the data to only show their own.
     if (currentUser?.role === 'Teknisi') {
-        bonData = data.filter(item => item.teknisi === currentUser.nama_teknisi);
+        bonData = bonData.filter(item => item.teknisi === currentUser.nama_teknisi);
     }
 
+    // Then, apply the filters from the UI
     return bonData.filter(item =>
       (filterTeknisi === '' || item.teknisi === filterTeknisi) &&
       (filterStatus === '' || item.status_bon === filterStatus)
@@ -291,23 +294,25 @@ export default function DailyBonClient() {
     <>
       <PageHeader title="Daily Bon">
         <div className="flex items-center gap-2">
-            <Select 
-              value={filterTeknisi}
-              onValueChange={(value) => {
-                setFilterTeknisi(value === 'all' ? '' : value);
-                setCurrentPage(1);
-              }}
-            >
-                <SelectTrigger className="w-[180px] bg-background">
-                    <SelectValue placeholder="Filter Teknisi" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="all">Semua Teknisi</SelectItem>
-                    {users?.filter(u => u.role === 'Teknisi').map(user => (
-                        <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
+            {currentUser?.role !== 'Teknisi' && (
+              <Select 
+                value={filterTeknisi}
+                onValueChange={(value) => {
+                  setFilterTeknisi(value === 'all' ? '' : value);
+                  setCurrentPage(1);
+                }}
+              >
+                  <SelectTrigger className="w-[180px] bg-background">
+                      <SelectValue placeholder="Filter Teknisi" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value="all">Semua Teknisi</SelectItem>
+                      {users?.filter(u => u.role === 'Teknisi').map(user => (
+                          <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
+                      ))}
+                  </SelectContent>
+              </Select>
+            )}
 
             <Select value={filterStatus} onValueChange={(value) => {setFilterStatus(value === 'all' ? '' : value); setCurrentPage(1);}}>
               <SelectTrigger className="w-[180px] bg-background">
@@ -645,6 +650,8 @@ export default function DailyBonClient() {
     </>
   );
 }
+
+    
 
     
 
