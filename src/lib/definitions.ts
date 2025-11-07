@@ -40,7 +40,6 @@ export type DailyBon = {
 
 export type BonPDS = {
   id?: string; // ID from Firestore
-  id_bonpds: string;
   part: string;
   deskripsi: string;
   qty_bonpds: number;

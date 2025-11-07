@@ -8,7 +8,7 @@ import { Plus, Search } from 'lucide-react';
 import type { BonPDS, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore } from '@/firebase';
-import { collection } from 'firebase/firestore';
+import { collection, addDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '../ui/skeleton';
 
 const addSchema = z.object({
   part: z.string().min(1, "Part wajib diisi"),
@@ -54,16 +55,16 @@ const addSchema = z.object({
 
 const ITEMS_PER_PAGE = 10;
 
-export default function BonPdsClient({ data: initialData }: { data: BonPDS[] }) {
+export default function BonPdsClient() {
   const { toast } = useToast();
   const firestore = useFirestore();
-  const inventoryQuery = useMemo(() => {
-    if (!firestore) return null;
-    return collection(firestore, 'inventory');
-  }, [firestore]);
-  const { data: inventory } = useCollection<InventoryItem>(inventoryQuery);
 
-  const [data, setData] = useState<BonPDS[]>(initialData);
+  const bonPdsQuery = useMemo(() => firestore ? collection(firestore, 'bon_pds') : null, [firestore]);
+  const inventoryQuery = useMemo(() => firestore ? collection(firestore, 'inventory') : null, [firestore]);
+  
+  const { data, isLoading: isLoadingData } = useCollection<BonPDS>(bonPdsQuery);
+  const { data: inventory, isLoading: isLoadingInventory } = useCollection<InventoryItem>(inventoryQuery);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -97,6 +98,7 @@ export default function BonPdsClient({ data: initialData }: { data: BonPDS[] }) 
 
 
   const filteredData = useMemo(() => {
+    if (!data) return [];
     return data.filter(item =>
       item.site_bonpds.toLowerCase().includes(searchTerm.toLowerCase())
     ).sort((a, b) => new Date(b.tanggal_bonpds).getTime() - new Date(a.tanggal_bonpds).getTime());
@@ -109,23 +111,29 @@ export default function BonPdsClient({ data: initialData }: { data: BonPDS[] }) 
     return filteredData.slice(start, end);
   }, [filteredData, currentPage]);
   
-  function onSubmit(values: z.infer<typeof addSchema>) {
-    const newBon: BonPDS = {
-        id_bonpds: `pds-${data.length + 1}`,
+  async function onSubmit(values: z.infer<typeof addSchema>) {
+    if (!firestore) return;
+    
+    const newBon: Omit<BonPDS, 'id'> = {
         part: values.part,
         deskripsi: values.deskripsi,
         qty_bonpds: values.qty_bonpds,
         status_bonpds: 'BON',
         site_bonpds: values.site_bonpds,
         tanggal_bonpds: new Date().toISOString().split('T')[0],
-        no_transaksi: `TRX-PDS-2024-${String(data.length + 1).padStart(3, '0')}`,
+        no_transaksi: `TRX-PDS-2024-${String((data?.length || 0) + 1).padStart(3, '0')}`,
         keterangan: values.keterangan || '',
     };
     
-    setData(prevData => [newBon, ...prevData]);
-    toast({ title: "Sukses", description: "Data Bon PDS berhasil ditambahkan." });
-    setIsModalOpen(false);
-    form.reset();
+    try {
+        await addDoc(collection(firestore, 'bon_pds'), newBon);
+        toast({ title: "Sukses", description: "Data Bon PDS berhasil ditambahkan." });
+        setIsModalOpen(false);
+        form.reset();
+    } catch (error) {
+        console.error("Error adding document: ", error);
+        toast({ variant: "destructive", title: "Gagal", description: "Gagal menambahkan data Bon PDS." });
+    }
   }
 
   const formatCurrency = (value: number) => {
@@ -137,6 +145,8 @@ export default function BonPdsClient({ data: initialData }: { data: BonPDS[] }) 
     'RECEIVED': 'secondary',
     'CANCELED': 'destructive'
   } as const;
+
+  const isLoading = isLoadingData || isLoadingInventory;
 
   return (
     <>
@@ -177,8 +187,27 @@ export default function BonPdsClient({ data: initialData }: { data: BonPDS[] }) 
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paginatedData.map(item => (
-                <TableRow key={item.id_bonpds}>
+              {isLoading ? (
+                 Array.from({ length: 5 }).map((_, index) => (
+                    <TableRow key={index}>
+                        <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-[80px] rounded-full" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                    </TableRow>
+                 ))
+              ) : paginatedData.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center h-24">
+                    Tidak ada data Bon PDS.
+                  </TableCell>
+                </TableRow>
+              ) : (paginatedData.map(item => (
+                <TableRow key={item.id}>
                   <TableCell className="font-medium">{item.part}</TableCell>
                   <TableCell>{item.deskripsi}</TableCell>
                   <TableCell>{item.qty_bonpds}</TableCell>
@@ -188,16 +217,18 @@ export default function BonPdsClient({ data: initialData }: { data: BonPDS[] }) 
                   <TableCell>{item.no_transaksi}</TableCell>
                   <TableCell>{item.keterangan}</TableCell>
                 </TableRow>
-              ))}
+              )))}
             </TableBody>
           </Table>
-          <DataTablePagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={setCurrentPage}
-            canPreviousPage={currentPage > 1}
-            canNextPage={currentPage < totalPages}
-          />
+          {!isLoading && paginatedData.length > 0 && (
+            <DataTablePagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              canPreviousPage={currentPage > 1}
+              canNextPage={currentPage < totalPages}
+            />
+          )}
         </div>
       </div>
 
