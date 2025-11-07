@@ -76,6 +76,7 @@ export default function UserRolesClient() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isAddingUser, setIsAddingUser] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const editForm = useForm<z.infer<typeof editSchema>>({
@@ -150,7 +151,7 @@ export default function UserRolesClient() {
       return;
     }
     
-    addForm.formState.isSubmitting = true;
+    setIsAddingUser(true);
 
     try {
       // 1. Create user in Firebase Auth
@@ -180,7 +181,7 @@ export default function UserRolesClient() {
         : "Gagal menambahkan pengguna baru. Periksa konsol untuk detailnya.";
       toast({ variant: "destructive", title: "Gagal", description: errorMessage });
     } finally {
-        addForm.formState.isSubmitting = false;
+        setIsAddingUser(false);
     }
   }
   
@@ -344,8 +345,8 @@ export default function UserRolesClient() {
                 <DialogClose asChild>
                   <Button type="button" variant="secondary" onClick={() => addForm.reset()}>Batal</Button>
                 </DialogClose>
-                <Button type="submit" disabled={addForm.formState.isSubmitting}>
-                  {addForm.formState.isSubmitting ? "Menyimpan..." : "Simpan Pengguna"}
+                <Button type="submit" disabled={isAddingUser}>
+                  {isAddingUser ? "Menyimpan..." : "Simpan Pengguna"}
                 </Button>
               </DialogFooter>
             </form>
@@ -355,3 +356,5 @@ export default function UserRolesClient() {
     </>
   );
 }
+
+    
