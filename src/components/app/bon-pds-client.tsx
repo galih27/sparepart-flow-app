@@ -9,7 +9,7 @@ import { Plus, Search, Trash2, Pencil, Eye } from 'lucide-react';
 import type { BonPDS, InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
-import { collection, addDoc, doc, deleteDoc, updateDoc, runTransaction, query, where, getDoc, Transaction } from 'firebase/firestore';
+import { collection, addDoc, doc, deleteDoc, updateDoc, runTransaction, query, where, getDocs } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -224,20 +224,32 @@ export default function BonPdsClient() {
 async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
 
+    const newStatus = values.status_bonpds;
+
+    // Find the corresponding inventory item before starting the transaction
+    const inventoryCol = collection(firestore, 'inventory');
+    const q = query(inventoryCol, where("part", "==", selectedBon.part));
+    const inventorySnapshot = await getDocs(q);
+
+    if (inventorySnapshot.empty) {
+        toast({ variant: "destructive", title: "Gagal", description: `Part ${selectedBon.part} tidak ditemukan di Report Stock.` });
+        return;
+    }
+    const inventoryDoc = inventorySnapshot.docs[0];
+    const inventoryRef = inventoryDoc.ref;
+
     try {
       await runTransaction(firestore, async (transaction) => {
-        const bonRef = doc(firestore, 'bon_pds', selectedBon.id!);
-        const bonDoc = await transaction.get(bonRef);
-         if (!bonDoc.exists()) {
+        const bonRef = doc(firestore, 'bon_pds', selectedBon!.id!);
+        const currentBonDoc = await transaction.get(bonRef);
+         if (!currentBonDoc.exists()) {
             throw new Error("Dokumen Bon PDS tidak ditemukan.");
         }
-        const originalBon = bonDoc.data() as BonPDS;
-        const originalStatus = originalBon.status_bonpds;
-        const newStatus = values.status_bonpds;
-
+        const originalStatus = currentBonDoc.data().status_bonpds;
+        
         // 1. Update the Bon PDS document
         transaction.update(bonRef, {
-          status_bonpds: values.status_bonpds,
+          status_bonpds: newStatus,
           no_transaksi: values.no_transaksi,
           keterangan: values.keterangan
         });
@@ -247,23 +259,17 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
         const stockWasNotDeducted = originalStatus !== 'RECEIVED';
 
         if (stockShouldBeDeducted && stockWasNotDeducted) {
-            const inventoryCol = collection(firestore, 'inventory');
-            const q = query(inventoryCol, where("part", "==", originalBon.part));
-            const inventorySnapshot = await transaction.get(q);
-
-            if (inventorySnapshot.empty) {
-                throw new Error(`Part ${originalBon.part} tidak ditemukan di Report Stock.`);
+            const currentInventoryDoc = await transaction.get(inventoryRef);
+            if (!currentInventoryDoc.exists()) {
+                throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock saat transaksi.`);
             }
+            const currentInventory = currentInventoryDoc.data() as InventoryItem;
 
-            const inventoryDoc = inventorySnapshot.docs[0];
-            const inventoryRef = inventoryDoc.ref;
-            const currentInventory = inventoryDoc.data() as InventoryItem;
-
-            const newQtyBaik = currentInventory.qty_baik - originalBon.qty_bonpds;
+            const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_bonpds;
             if (newQtyBaik < 0) {
-                throw new Error(`Stok 'baik' untuk part ${originalBon.part} tidak mencukupi.`);
+                throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
             }
-            const newAvailableQty = currentInventory.available_qty - originalBon.qty_bonpds;
+            const newAvailableQty = currentInventory.available_qty - selectedBon.qty_bonpds;
 
             transaction.update(inventoryRef, {
                 qty_baik: newQtyBaik,

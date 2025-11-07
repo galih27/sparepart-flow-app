@@ -9,7 +9,7 @@ import { Plus, Pencil, Eye, Trash2 } from 'lucide-react';
 import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc, runTransaction, query, where, Transaction, getDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, runTransaction, query, where, getDocs } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -238,20 +238,33 @@ export default function DailyBonClient() {
     }
   };
   
-async function onEditSubmit(values: z.infer<typeof editSchema>) {
+  async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
+
+    const newStatus = values.status_bon;
+
+    // Find the corresponding inventory item before starting the transaction
+    const inventoryCol = collection(firestore, 'inventory');
+    const q = query(inventoryCol, where("part", "==", selectedBon.part));
+    const inventorySnapshot = await getDocs(q);
+
+    if (inventorySnapshot.empty) {
+        toast({ variant: "destructive", title: "Gagal", description: `Part ${selectedBon.part} tidak ditemukan di Report Stock.` });
+        return;
+    }
+    const inventoryDoc = inventorySnapshot.docs[0];
+    const inventoryRef = inventoryDoc.ref;
+
 
     try {
       await runTransaction(firestore, async (transaction) => {
-        const bonRef = doc(firestore, 'daily_bon', selectedBon.id!);
-        const bonDoc = await transaction.get(bonRef);
-        if (!bonDoc.exists()) {
+        const bonRef = doc(firestore, 'daily_bon', selectedBon!.id!);
+        const currentBonDoc = await transaction.get(bonRef);
+        if (!currentBonDoc.exists()) {
             throw new Error("Dokumen bon harian tidak ditemukan.");
         }
-        const originalBon = bonDoc.data() as DailyBon;
-        const originalStatus = originalBon.status_bon;
-        const newStatus = values.status_bon;
-
+        const originalStatus = currentBonDoc.data().status_bon;
+        
         // 1. Update the Daily Bon document
         transaction.update(bonRef, {
           status_bon: newStatus,
@@ -259,28 +272,22 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
           keterangan: values.keterangan
         });
 
-        // 2. Check if stock needs to be deducted
+        // 2. Check if stock needs to be deducted based on the specific scenario
         const stockShouldBeDeducted = (newStatus === 'RECEIVED' || newStatus === 'KMP');
-        const stockWasNotDeducted = (originalStatus !== 'RECEIVED' && originalStatus !== 'KMP');
+        const stockWasDeducted = (originalStatus === 'RECEIVED' || originalStatus === 'KMP');
 
-        if (stockShouldBeDeducted && stockWasNotDeducted) {
-            const inventoryCol = collection(firestore, 'inventory');
-            const q = query(inventoryCol, where("part", "==", originalBon.part));
-            const inventorySnapshot = await transaction.get(q);
-
-            if (inventorySnapshot.empty) {
-                throw new Error(`Part ${originalBon.part} tidak ditemukan di Report Stock.`);
+        if (stockShouldBeDeducted && !stockWasDeducted) {
+            const currentInventoryDoc = await transaction.get(inventoryRef);
+            if (!currentInventoryDoc.exists()) {
+                throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock saat transaksi.`);
             }
-
-            const inventoryDoc = inventorySnapshot.docs[0];
-            const inventoryRef = inventoryDoc.ref;
-            const currentInventory = inventoryDoc.data() as InventoryItem;
+            const currentInventory = currentInventoryDoc.data() as InventoryItem;
             
-            const newQtyBaik = currentInventory.qty_baik - originalBon.qty_dailybon;
+            const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_dailybon;
             if (newQtyBaik < 0) {
-                throw new Error(`Stok 'baik' untuk part ${originalBon.part} tidak mencukupi.`);
+                throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
             }
-            const newAvailableQty = currentInventory.available_qty - originalBon.qty_dailybon;
+            const newAvailableQty = currentInventory.available_qty - selectedBon.qty_dailybon;
             
             transaction.update(inventoryRef, {
                 qty_baik: newQtyBaik,

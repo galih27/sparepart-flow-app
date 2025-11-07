@@ -9,7 +9,7 @@ import { Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
 import type { Msk, InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
-import { collection, doc, addDoc, updateDoc, deleteDoc, runTransaction, query, where, Transaction, getDoc } from 'firebase/firestore';
+import { collection, doc, addDoc, updateDoc, deleteDoc, runTransaction, query, where, getDocs } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -193,62 +193,56 @@ export default function MskClient() {
     }
   };
   
-async function onSubmit(values: z.infer<typeof formSchema>) {
+  async function onSubmit(values: z.infer<typeof formSchema>) {
     if (!firestore) return;
     
     const isEditing = !!selectedMsk?.id;
-    const mskToSave = { ...values };
+    const mskToSave = { ...values, tanggal_msk: isEditing ? selectedMsk.tanggal_msk : new Date().toISOString().split('T')[0] };
+
+    // Find the corresponding inventory item before starting the transaction
+    const inventoryCol = collection(firestore, 'inventory');
+    const q = query(inventoryCol, where("part", "==", values.part));
+    const inventorySnapshot = await getDocs(q);
+    const inventoryDoc = inventorySnapshot.docs.length > 0 ? inventorySnapshot.docs[0] : null;
+    const inventoryRef = inventoryDoc ? inventoryDoc.ref : null;
 
     try {
         await runTransaction(firestore, async (transaction) => {
-            let mskRef;
             let originalStatus: Msk['status_msk'] | undefined = undefined;
 
             if (isEditing) {
                 if (!selectedMsk?.id) throw new Error("ID MSK tidak ditemukan untuk diedit.");
-                mskRef = doc(firestore, 'msk', selectedMsk.id);
+                const mskRef = doc(firestore, 'msk', selectedMsk.id);
                 const mskDoc = await transaction.get(mskRef);
                 if (!mskDoc.exists()) throw new Error("Dokumen MSK tidak ditemukan.");
                 originalStatus = mskDoc.data().status_msk;
                 transaction.update(mskRef, mskToSave);
             } else {
-                mskRef = doc(collection(firestore, 'msk'));
-                const newMskData = {
-                    ...mskToSave,
-                    tanggal_msk: new Date().toISOString().split('T')[0],
-                };
-                transaction.set(mskRef, newMskData);
+                const mskRef = doc(collection(firestore, 'msk'));
+                transaction.set(mskRef, mskToSave);
             }
             
-            const inventoryQueryTx = query(collection(firestore, 'inventory'), where("part", "==", values.part));
-            const inventorySnapshot = await getDocs(inventoryQueryTx); // Use getDocs, not transaction.get for query
-            const inventoryDoc = inventorySnapshot.docs[0];
-            const inventoryRef = inventoryDoc ? inventoryDoc.ref : null;
-            const currentInventory = inventoryDoc ? inventoryDoc.data() as InventoryItem : null;
-
             const wasReceived = originalStatus === 'RECEIVED';
             const isNowReceived = values.status_msk === 'RECEIVED';
 
+            if (!inventoryRef) {
+                if(isNowReceived) {
+                    throw new Error(`Part ${values.part} tidak ditemukan di Report Stock. Transaksi masuk tidak dapat diselesaikan.`);
+                } else {
+                    // Allow creating BON transaction even if part doesn't exist
+                    return; 
+                }
+            }
+            
             // Logic to add stock
             if (isNowReceived && !wasReceived) {
-                if (!inventoryRef || !currentInventory) {
-                     throw new Error(`Part ${values.part} tidak ditemukan di Report Stock. Tidak dapat menambahkan stok.`);
+                const currentInventoryDoc = await transaction.get(inventoryRef);
+                if (!currentInventoryDoc.exists()) {
+                    throw new Error(`Part ${values.part} tidak ditemukan di Report Stock saat transaksi.`);
                 }
+                const currentInventory = currentInventoryDoc.data() as InventoryItem;
                 const newQtyBaik = currentInventory.qty_baik + values.qty_msk;
                 const newAvailableQty = currentInventory.available_qty + values.qty_msk;
-                transaction.update(inventoryRef, { qty_baik: newQtyBaik, available_qty: newAvailableQty });
-            }
-            // Logic to revert stock addition
-            else if (!isNowReceived && wasReceived) {
-                 if (!inventoryRef || !currentInventory) {
-                     throw new Error(`Part ${values.part} tidak ditemukan di Report Stock. Tidak dapat mengembalikan stok.`);
-                }
-                const newQtyBaik = currentInventory.qty_baik - values.qty_msk;
-                if (newQtyBaik < 0) {
-                  // This case should be handled carefully, maybe prevent this state change
-                  console.warn(`Mengembalikan stok untuk part ${values.part} akan menghasilkan kuantitas negatif.`);
-                }
-                const newAvailableQty = currentInventory.available_qty - values.qty_msk;
                 transaction.update(inventoryRef, { qty_baik: newQtyBaik, available_qty: newAvailableQty });
             }
         });
@@ -263,7 +257,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
         console.error("Error in transaction: ", error);
         toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menyimpan data MSK." });
     }
-}
+  }
   
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
