@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
@@ -9,8 +9,7 @@ import type { InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore } from '@/firebase';
 import { collection, doc, updateDoc, writeBatch } from 'firebase/firestore';
-import { inventoryData as mockInventory } from '@/lib/inventory-mock';
-
+import * as XLSX from 'xlsx';
 
 import PageHeader from '@/components/app/page-header';
 import { Input } from '@/components/ui/input';
@@ -65,7 +64,9 @@ export default function ReportStockClient() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const form = useForm<z.infer<typeof editSchema>>({
     resolver: zodResolver(editSchema),
@@ -98,33 +99,93 @@ export default function ReportStockClient() {
     setIsEditing(true);
   };
 
-  const handleImport = async () => {
-    if (!firestore) {
-      toast({ variant: "destructive", title: "Gagal", description: "Koneksi Firestore tidak tersedia." });
-      return;
-    }
-    if (initialData && initialData.length > 0) {
-      toast({ variant: "destructive", title: "Gagal", description: "Data inventaris sudah ada. Hapus data lama untuk mengimpor." });
-      return;
-    }
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
     setIsImporting(true);
-    toast({ title: "Mengimpor Data", description: "Mohon tunggu, data sedang diimpor ke Firestore..." });
+    toast({ title: "Mengimpor Data", description: "Mohon tunggu, file Excel sedang diproses..." });
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json<any>(worksheet);
+
+        if (!firestore) {
+            throw new Error("Koneksi Firestore tidak tersedia.");
+        }
+
+        // Basic validation
+        if (json.length > 0 && !json[0].hasOwnProperty('part')) {
+            throw new Error("Format file Excel tidak sesuai. Pastikan ada kolom 'part'.");
+        }
+
+        const batch = writeBatch(firestore);
+        json.forEach((row) => {
+          const docRef = doc(collection(firestore, "inventory"));
+          const inventoryItem: Omit<InventoryItem, 'id'> = {
+            part: row.part || '',
+            deskripsi: row.deskripsi || '',
+            harga_dpp: Number(row.harga_dpp) || 0,
+            ppn: Number(row.ppn) || 0,
+            total_harga: Number(row.total_harga) || 0,
+            satuan: row.satuan || 'pcs',
+            available_qty: (Number(row.qty_baik) || 0) + (Number(row.qty_rusak) || 0),
+            qty_baik: Number(row.qty_baik) || 0,
+            qty_rusak: Number(row.qty_rusak) || 0,
+            lokasi: row.lokasi || '',
+            return_to_factory: Number(row.return_to_factory) || 0,
+            qty_real: (Number(row.qty_baik) || 0) + (Number(row.qty_rusak) || 0),
+          };
+          batch.set(docRef, inventoryItem);
+        });
+
+        await batch.commit();
+        toast({ title: "Sukses", description: `${json.length} data inventaris berhasil diimpor.` });
+
+      } catch (error: any) {
+        console.error("Error importing data: ", error);
+        toast({ variant: "destructive", title: "Gagal Impor", description: error.message || "Terjadi kesalahan saat mengimpor data." });
+      } finally {
+        setIsImporting(false);
+        // Reset file input
+        if(fileInputRef.current) fileInputRef.current.value = "";
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleExport = () => {
+    if (!initialData || initialData.length === 0) {
+      toast({ variant: 'destructive', title: 'Gagal Export', description: 'Tidak ada data untuk diexport.' });
+      return;
+    }
+    setIsExporting(true);
+    toast({ title: 'Mengekspor Data', description: 'Mohon tunggu, data sedang disiapkan...' });
 
     try {
-      const batch = writeBatch(firestore);
-      mockInventory.forEach((item) => {
-        const docRef = doc(collection(firestore, "inventory"));
-        batch.set(docRef, item);
-      });
-      await batch.commit();
-      toast({ title: "Sukses", description: `${mockInventory.length} data inventaris berhasil diimpor.` });
+      const dataToExport = initialData.map(({ id, ...item }) => item);
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Report Stock');
+      XLSX.writeFile(workbook, 'report_stock.xlsx');
+      toast({ title: 'Sukses', description: 'Data inventaris berhasil diexport.' });
     } catch (error) {
-      console.error("Error importing data: ", error);
-      toast({ variant: "destructive", title: "Gagal Impor", description: "Terjadi kesalahan saat mengimpor data." });
+      console.error('Error exporting data: ', error);
+      toast({ variant: 'destructive', title: 'Gagal Export', description: 'Terjadi kesalahan saat mengekspor data.' });
     } finally {
-      setIsImporting(false);
+      setIsExporting(false);
     }
   };
+
 
   async function onSubmit(values: z.infer<typeof editSchema>) {
     if (!selectedItem || !selectedItem.id || !firestore) return;
@@ -166,10 +227,19 @@ export default function ReportStockClient() {
             }}
           />
         </div>
-        <Button variant="outline" onClick={handleImport} disabled={isImporting || (initialData && initialData.length > 0)}>
-          <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Import'}
+        <Input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          className="hidden"
+          accept=".xlsx, .xls"
+        />
+        <Button variant="outline" onClick={handleImportClick} disabled={isImporting}>
+          <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Upload Excel'}
         </Button>
-        <Button><FileDown className="mr-2" /> Export</Button>
+        <Button onClick={handleExport} disabled={isExporting}>
+            <FileDown className="mr-2" /> {isExporting ? 'Mengekspor...' : 'Export Excel'}
+        </Button>
       </PageHeader>
 
       <div className="p-4 md:p-6">
@@ -204,7 +274,7 @@ export default function ReportStockClient() {
               ) : paginatedData.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center h-24">
-                    Tidak ada data. Klik tombol 'Import' untuk mengisi data inventaris awal.
+                    Tidak ada data. Klik tombol 'Upload Excel' untuk mengimpor data.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -304,7 +374,7 @@ export default function ReportStockClient() {
                 </div>
                 <div className="grid grid-cols-[150px_1fr] items-center gap-4">
                   <span className="text-muted-foreground">Qty Rusak</span>
-                  <span>{selectedSistem.qty_rusak} {selectedItem.satuan}</span>
+                  <span>{selectedItem.qty_rusak} {selectedItem.satuan}</span>
                 </div>
                  <div className="grid grid-cols-[150px_1fr] items-center gap-4">
                   <span className="text-muted-foreground">Qty Real</span>
