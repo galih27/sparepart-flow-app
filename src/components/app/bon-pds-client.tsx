@@ -9,7 +9,7 @@ import { Plus, Search, Trash2, Pencil, Eye } from 'lucide-react';
 import type { BonPDS, InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
-import { collection, addDoc, doc, deleteDoc, updateDoc, runTransaction, query, where, getDocs } from 'firebase/firestore';
+import { collection, addDoc, doc, deleteDoc, updateDoc, runTransaction, query, where, getDoc, Transaction } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -61,6 +61,7 @@ const addSchema = z.object({
   deskripsi: z.string(),
   qty_bonpds: z.coerce.number().min(1, "Kuantitas harus lebih dari 0"),
   harga: z.number(),
+  status_bonpds: z.enum(["BON", "RECEIVED", "CANCELED"]),
   site_bonpds: z.string().min(1, "Site wajib diisi"),
   keterangan: z.string().optional(),
 });
@@ -72,6 +73,40 @@ const editSchema = z.object({
 });
 
 const ITEMS_PER_PAGE = 10;
+
+/**
+ * Updates the inventory based on a BonPDS transaction.
+ * @param transaction - The Firestore transaction.
+ * @param firestore - The Firestore instance.
+ * @param bon - The bon PDS data.
+ * @param change - The stock change amount (-qty for deduction, +qty for restock).
+ */
+async function updateInventoryForBon(transaction: Transaction, firestore: any, bon: Omit<BonPDS, 'id'>, change: number) {
+    if (change === 0) return;
+
+    const inventoryCol = collection(firestore, 'inventory');
+    const q = query(inventoryCol, where("part", "==", bon.part));
+    const inventorySnapshot = await transaction.get(q);
+
+    if (inventorySnapshot.empty) {
+        throw new Error(`Part ${bon.part} tidak ditemukan di Report Stock.`);
+    }
+
+    const inventoryDoc = inventorySnapshot.docs[0];
+    const inventoryRef = inventoryDoc.ref;
+    const currentInventory = inventoryDoc.data() as InventoryItem;
+
+    const newQtyBaik = currentInventory.qty_baik + change;
+    if (newQtyBaik < 0) {
+        throw new Error(`Stok 'baik' untuk part ${bon.part} tidak mencukupi.`);
+    }
+    const newAvailableQty = currentInventory.available_qty + change;
+
+    transaction.update(inventoryRef, {
+        qty_baik: newQtyBaik,
+        available_qty: newAvailableQty
+    });
+}
 
 export default function BonPdsClient() {
   const { toast } = useToast();
@@ -108,6 +143,7 @@ export default function BonPdsClient() {
       deskripsi: "",
       qty_bonpds: 1,
       harga: 0,
+      status_bonpds: "BON",
       site_bonpds: "",
       keterangan: "",
     },
@@ -183,11 +219,26 @@ export default function BonPdsClient() {
     if (!selectedBon || !selectedBon.id || !firestore) return;
 
     try {
-      await deleteDoc(doc(firestore, 'bon_pds', selectedBon.id));
-      toast({ title: "Sukses", description: "Bon PDS telah dihapus." });
-    } catch (error) {
+        await runTransaction(firestore, async (transaction) => {
+            const bonRef = doc(firestore, 'bon_pds', selectedBon.id!);
+            const bonDoc = await transaction.get(bonRef);
+            if (!bonDoc.exists()) {
+                throw new Error("Dokumen Bon PDS tidak ditemukan.");
+            }
+            const bonData = bonDoc.data() as BonPDS;
+
+            transaction.delete(bonRef);
+
+            const wasStockDeducted = bonData.status_bonpds === 'RECEIVED';
+            if (wasStockDeducted) {
+                await updateInventoryForBon(transaction, firestore, bonData, +bonData.qty_bonpds);
+            }
+        });
+
+      toast({ title: "Sukses", description: "Bon PDS telah dihapus dan stok telah dikembalikan (jika perlu)." });
+    } catch (error: any) {
       console.error("Error deleting document: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus Bon PDS." });
+      toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menghapus Bon PDS." });
     } finally {
       setIsDeleting(false);
       setSelectedBon(null);
@@ -201,7 +252,7 @@ export default function BonPdsClient() {
         part: values.part,
         deskripsi: values.deskripsi,
         qty_bonpds: values.qty_bonpds,
-        status_bonpds: 'BON',
+        status_bonpds: values.status_bonpds,
         site_bonpds: values.site_bonpds,
         tanggal_bonpds: new Date().toISOString().split('T')[0],
         no_transaksi: `TRX-PDS-${Date.now()}`,
@@ -209,25 +260,39 @@ export default function BonPdsClient() {
     };
     
     try {
-        await addDoc(collection(firestore, 'bon_pds'), newBon);
-        toast({ title: "Sukses", description: "Data Bon PDS berhasil ditambahkan." });
+        await runTransaction(firestore, async (transaction) => {
+            const newBonRef = doc(collection(firestore, 'bon_pds'));
+            transaction.set(newBonRef, newBon);
+
+            const willStockBeDeducted = newBon.status_bonpds === 'RECEIVED';
+            if (willStockBeDeducted) {
+                await updateInventoryForBon(transaction, firestore, newBon, -newBon.qty_bonpds);
+            }
+        });
+
+        toast({ title: "Sukses", description: "Data Bon PDS berhasil ditambahkan dan stok diperbarui." });
         setIsAddModalOpen(false);
         addForm.reset();
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error adding document: ", error);
-        toast({ variant: "destructive", title: "Gagal", description: "Gagal menambahkan data Bon PDS." });
+        toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menambahkan data Bon PDS." });
     }
   }
 
 async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
 
-    const bonRef = doc(firestore, 'bon_pds', selectedBon.id);
-    const originalStatus = selectedBon.status_bonpds;
-    const newStatus = values.status_bonpds;
-
     try {
       await runTransaction(firestore, async (transaction) => {
+        const bonRef = doc(firestore, 'bon_pds', selectedBon.id!);
+        const bonDoc = await transaction.get(bonRef);
+         if (!bonDoc.exists()) {
+            throw new Error("Dokumen Bon PDS tidak ditemukan.");
+        }
+        const originalBon = bonDoc.data() as BonPDS;
+        const originalStatus = originalBon.status_bonpds;
+        const newStatus = values.status_bonpds;
+
         // 1. Update the Bon PDS document
         transaction.update(bonRef, {
           status_bonpds: values.status_bonpds,
@@ -235,48 +300,21 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
           keterangan: values.keterangan
         });
 
-        const isStockDeducted = originalStatus === 'RECEIVED';
+        // 2. Calculate stock change
+        const wasStockDeducted = originalStatus === 'RECEIVED';
         const willStockBeDeducted = newStatus === 'RECEIVED';
         
-        if (isStockDeducted === willStockBeDeducted) {
-          // No change in stock status, so no need to update inventory.
-          return;
-        }
-
-        const inventoryCol = collection(firestore, 'inventory');
-        const q = query(inventoryCol, where("part", "==", selectedBon.part));
-        // Use transaction.get() inside a transaction
-        const inventorySnapshot = await transaction.get(q);
-
-        if (inventorySnapshot.empty) {
-          throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
-        }
-
-        const inventoryDoc = inventorySnapshot.docs[0];
-        const inventoryRef = inventoryDoc.ref;
-        const currentInventory = inventoryDoc.data() as InventoryItem;
-
         let stockChange = 0;
-        if (willStockBeDeducted && !isStockDeducted) {
-            // Moving to RECEIVED from another state
-            stockChange = -selectedBon.qty_bonpds;
-        } else if (!willStockBeDeducted && isStockDeducted) {
-            // Moving from RECEIVED to another state (restocking)
-            stockChange = +selectedBon.qty_bonpds;
+        if (willStockBeDeducted && !wasStockDeducted) {
+            stockChange = -originalBon.qty_bonpds;
+        } else if (!willStockBeDeducted && wasStockDeducted) {
+            stockChange = +originalBon.qty_bonpds;
         }
 
-        const newQtyBaik = currentInventory.qty_baik + stockChange;
-        
-        if (newQtyBaik < 0) {
-          throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
+        // 3. Apply stock change if necessary
+        if (stockChange !== 0) {
+            await updateInventoryForBon(transaction, firestore, originalBon, stockChange);
         }
-        
-        const newAvailableQty = currentInventory.available_qty + stockChange;
-
-        transaction.update(inventoryRef, {
-          qty_baik: newQtyBaik,
-          available_qty: newAvailableQty
-        });
       });
 
       toast({ title: "Sukses", description: "Status bon berhasil diperbarui dan stok telah disesuaikan." });
@@ -431,7 +469,7 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
           <AlertDialogHeader>
             <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
             <AlertDialogDescription>
-              Tindakan ini akan menghapus Bon PDS untuk <strong>{selectedBon?.part}</strong> ke site <strong>{selectedBon?.site_bonpds}</strong>. Data yang dihapus tidak dapat dipulihkan.
+              Tindakan ini akan menghapus Bon PDS untuk <strong>{selectedBon?.part}</strong> ke site <strong>{selectedBon?.site_bonpds}</strong>. Jika stok sudah dikurangi, maka akan dikembalikan.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -501,10 +539,28 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
                   </FormItem>
                 )}
               />
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Input value="BON" readOnly disabled className="bg-muted"/>
-              </div>
+              <FormField
+                control={addForm.control}
+                name="status_bonpds"
+                render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Status</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Pilih Status" />
+                                </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="BON">BON</SelectItem>
+                                <SelectItem value="RECEIVED">RECEIVED</SelectItem>
+                                <SelectItem value="CANCELED">CANCELED</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <FormMessage />
+                    </FormItem>
+                )}
+              />
               <FormField
                 control={addForm.control}
                 name="site_bonpds"
@@ -655,5 +711,3 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
     </>
   );
 }
-
-    

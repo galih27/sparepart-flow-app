@@ -9,7 +9,7 @@ import { Plus, Pencil, Eye, Trash2 } from 'lucide-react';
 import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc, runTransaction, query, where, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, runTransaction, query, where, Transaction, getDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -67,6 +67,7 @@ const addSchema = z.object({
   deskripsi: z.string(),
   qty_dailybon: z.coerce.number().min(1, "Kuantitas harus lebih dari 0"),
   harga: z.number(),
+  status_bon: z.enum(["BON", "RECEIVED", "KMP", "CANCELED"]),
   teknisi: z.string().min(1, "Teknisi wajib diisi"),
   keterangan: z.string().optional(),
 });
@@ -78,6 +79,41 @@ const editSchema = z.object({
 })
 
 const ITEMS_PER_PAGE = 10;
+
+/**
+ * Updates the inventory based on a DailyBon transaction.
+ * @param transaction - The Firestore transaction.
+ * @param firestore - The Firestore instance.
+ * @param bon - The daily bon data.
+ * @param change - The stock change amount (-qty for deduction, +qty for restock).
+ */
+async function updateInventoryForBon(transaction: Transaction, firestore: any, bon: Omit<DailyBon, 'id'>, change: number) {
+    if (change === 0) return;
+
+    const inventoryCol = collection(firestore, 'inventory');
+    const q = query(inventoryCol, where("part", "==", bon.part));
+    const inventorySnapshot = await transaction.get(q);
+
+    if (inventorySnapshot.empty) {
+        throw new Error(`Part ${bon.part} tidak ditemukan di Report Stock.`);
+    }
+
+    const inventoryDoc = inventorySnapshot.docs[0];
+    const inventoryRef = inventoryDoc.ref;
+    const currentInventory = inventoryDoc.data() as InventoryItem;
+
+    const newQtyBaik = currentInventory.qty_baik + change;
+    if (newQtyBaik < 0) {
+        throw new Error(`Stok 'baik' untuk part ${bon.part} tidak mencukupi.`);
+    }
+    const newAvailableQty = currentInventory.available_qty + change;
+
+    transaction.update(inventoryRef, {
+        qty_baik: newQtyBaik,
+        available_qty: newAvailableQty
+    });
+}
+
 
 export default function DailyBonClient() {
   const { toast } = useToast();
@@ -115,6 +151,7 @@ export default function DailyBonClient() {
       deskripsi: "",
       qty_dailybon: 1,
       harga: 0,
+      status_bon: "BON",
       teknisi: "",
       keterangan: "",
     },
@@ -139,18 +176,22 @@ export default function DailyBonClient() {
     }
   }, [watchedPart, inventory, addForm]);
 
+  useEffect(() => {
+    if (currentUser?.role === 'Teknisi') {
+      addForm.setValue('teknisi', currentUser.nama_teknisi);
+    }
+  }, [currentUser, addForm, isAddModalOpen]);
+
 
   const filteredData = useMemo(() => {
     if (!data) return [];
     
     let bonData = data;
     
-    // If the user is a 'Teknisi', pre-filter the data to only show their own.
     if (currentUser?.role === 'Teknisi') {
         bonData = bonData.filter(item => item.teknisi === currentUser.nama_teknisi);
     }
 
-    // Then, apply the filters from the UI
     return bonData.filter(item =>
       (filterTeknisi === '' || item.teknisi === filterTeknisi) &&
       (filterStatus === '' || item.status_bon === filterStatus)
@@ -169,26 +210,36 @@ export default function DailyBonClient() {
   
   async function onAddSubmit(values: z.infer<typeof addSchema>) {
     if (!firestore) return;
+    
     const newBon: Omit<DailyBon, 'id'> = {
         part: values.part,
         deskripsi: values.deskripsi,
         qty_dailybon: values.qty_dailybon,
         harga: values.harga,
-        status_bon: 'BON',
+        status_bon: values.status_bon,
         teknisi: values.teknisi,
         tanggal_dailybon: new Date().toISOString().split('T')[0],
-        no_tkl: '', // Set to empty string on creation
+        no_tkl: '',
         keterangan: values.keterangan || '',
     };
     
     try {
-        await addDoc(collection(firestore, 'daily_bon'), newBon);
-        toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan." });
+        await runTransaction(firestore, async (transaction) => {
+            const newBonRef = doc(collection(firestore, 'daily_bon'));
+            transaction.set(newBonRef, newBon);
+
+            const willStockBeDeducted = newBon.status_bon === 'RECEIVED' || newBon.status_bon === 'KMP';
+            if (willStockBeDeducted) {
+                await updateInventoryForBon(transaction, firestore, newBon, -newBon.qty_dailybon);
+            }
+        });
+
+        toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan dan stok diperbarui." });
         setIsAddModalOpen(false);
         addForm.reset();
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error adding document: ", error);
-        toast({ variant: "destructive", title: "Gagal", description: "Gagal menambahkan data bon harian." });
+        toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menambahkan data bon harian." });
     }
   }
 
@@ -220,75 +271,73 @@ export default function DailyBonClient() {
     if (!selectedBon || !selectedBon.id || !firestore) return;
 
     try {
-      await deleteDoc(doc(firestore, 'daily_bon', selectedBon.id));
-      toast({ title: "Sukses", description: "Bon harian telah dihapus." });
-    } catch (error) {
-      console.error("Error deleting document: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus bon harian." });
+        await runTransaction(firestore, async (transaction) => {
+            const bonRef = doc(firestore, 'daily_bon', selectedBon.id!);
+            const bonDoc = await transaction.get(bonRef);
+            if (!bonDoc.exists()) {
+                throw new Error("Dokumen bon harian tidak ditemukan.");
+            }
+            const bonData = bonDoc.data() as DailyBon;
+
+            // Delete the bon document
+            transaction.delete(bonRef);
+
+            // If the deleted bon had deducted stock, restock it
+            const wasStockDeducted = bonData.status_bon === 'RECEIVED' || bonData.status_bon === 'KMP';
+            if (wasStockDeducted) {
+                await updateInventoryForBon(transaction, firestore, bonData, +bonData.qty_dailybon);
+            }
+        });
+        
+        toast({ title: "Sukses", description: "Bon harian telah dihapus dan stok telah dikembalikan (jika perlu)." });
+
+    } catch (error: any) {
+        console.error("Error deleting document: ", error);
+        toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menghapus bon harian." });
     } finally {
-      setIsDeleting(false);
-      setSelectedBon(null);
+        setIsDeleting(false);
+        setSelectedBon(null);
     }
   };
   
 async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
 
-    const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
-    const originalStatus = selectedBon.status_bon;
-    const newStatus = values.status_bon;
-
     try {
       await runTransaction(firestore, async (transaction) => {
-        // Update the Daily Bon document first
+        const bonRef = doc(firestore, 'daily_bon', selectedBon.id!);
+        const bonDoc = await transaction.get(bonRef);
+        if (!bonDoc.exists()) {
+            throw new Error("Dokumen bon harian tidak ditemukan.");
+        }
+        const originalBon = bonDoc.data() as DailyBon;
+        const originalStatus = originalBon.status_bon;
+        const newStatus = values.status_bon;
+
+        // 1. Update the Daily Bon document
         transaction.update(bonRef, {
-          status_bon: values.status_bon,
+          status_bon: newStatus,
           no_tkl: values.no_tkl,
           keterangan: values.keterangan
         });
 
-        const isStockDeducted = originalStatus === 'RECEIVED' || originalStatus === 'KMP';
+        // 2. Calculate stock change
+        const wasStockDeducted = originalStatus === 'RECEIVED' || originalStatus === 'KMP';
         const willStockBeDeducted = newStatus === 'RECEIVED' || newStatus === 'KMP';
 
-        if (isStockDeducted === willStockBeDeducted) {
-          // No change in stock status, so no need to update inventory.
-          return;
-        }
-
-        const inventoryCol = collection(firestore, 'inventory');
-        const q = query(inventoryCol, where("part", "==", selectedBon.part));
-        // Use transaction.get() instead of getDocs() inside a transaction
-        const inventorySnapshot = await transaction.get(q);
-
-        if (inventorySnapshot.empty) {
-          throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
-        }
-
-        const inventoryDoc = inventorySnapshot.docs[0];
-        const inventoryRef = inventoryDoc.ref;
-        const currentInventory = inventoryDoc.data() as InventoryItem;
-
         let stockChange = 0;
-        if (willStockBeDeducted && !isStockDeducted) {
-            // Moving to a stock-deducted state
-            stockChange = -selectedBon.qty_dailybon;
-        } else if (!willStockBeDeducted && isStockDeducted) {
-            // Moving away from a stock-deducted state (restocking)
-            stockChange = +selectedBon.qty_dailybon;
+        if (willStockBeDeducted && !wasStockDeducted) {
+            // Moving to a stock-deducted state (e.g., BON -> RECEIVED)
+            stockChange = -originalBon.qty_dailybon;
+        } else if (!willStockBeDeducted && wasStockDeducted) {
+            // Moving away from a stock-deducted state (e.g., RECEIVED -> CANCELED)
+            stockChange = +originalBon.qty_dailybon;
         }
-        
-        const newQtyBaik = currentInventory.qty_baik + stockChange;
 
-        if (newQtyBaik < 0) {
-          throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
+        // 3. Apply stock change if necessary
+        if (stockChange !== 0) {
+            await updateInventoryForBon(transaction, firestore, originalBon, stockChange);
         }
-        
-        const newAvailableQty = currentInventory.available_qty + stockChange;
-        
-        transaction.update(inventoryRef, {
-          qty_baik: newQtyBaik,
-          available_qty: newAvailableQty
-        });
       });
 
       toast({ title: "Sukses", description: "Status bon berhasil diperbarui dan stok telah disesuaikan." });
@@ -457,7 +506,7 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
           <AlertDialogHeader>
             <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
             <AlertDialogDescription>
-              Tindakan ini akan menghapus bon untuk <strong>{selectedBon?.part}</strong> secara permanen. Data yang dihapus tidak dapat dipulihkan.
+              Tindakan ini akan menghapus bon untuk <strong>{selectedBon?.part}</strong> secara permanen. Jika stok sudah dikurangi, maka akan dikembalikan.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -527,10 +576,29 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
                   </FormItem>
                 )}
               />
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Input value="BON" readOnly disabled className="bg-muted"/>
-              </div>
+               <FormField
+                control={addForm.control}
+                name="status_bon"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Status</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Pilih Status" />
+                            </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                            <SelectItem value="BON">BON</SelectItem>
+                            <SelectItem value="RECEIVED">RECEIVED</SelectItem>
+                            <SelectItem value="KMP">KMP</SelectItem>
+                            <SelectItem value="CANCELED">CANCELED</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={addForm.control}
                 name="teknisi"
@@ -539,8 +607,7 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
                     <FormLabel>Teknisi</FormLabel>
                     <Select 
                         onValueChange={field.onChange} 
-                        defaultValue={field.value} 
-                        value={currentUser?.role === 'Teknisi' ? currentUser?.nama_teknisi : field.value}
+                        value={field.value}
                         disabled={currentUser?.role === 'Teknisi'}
                     >
                       <FormControl>
@@ -700,5 +767,3 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
     </>
   );
 }
-
-    

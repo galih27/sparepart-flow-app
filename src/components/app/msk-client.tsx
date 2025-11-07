@@ -9,7 +9,7 @@ import { Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
 import type { Msk, InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
-import { collection, doc, addDoc, updateDoc, deleteDoc, runTransaction, query, where, getDocs } from 'firebase/firestore';
+import { collection, doc, addDoc, updateDoc, deleteDoc, runTransaction, query, where, Transaction, getDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -74,6 +74,65 @@ const formSchema = z.object({
 });
 
 const ITEMS_PER_PAGE = 10;
+
+/**
+ * Updates the inventory based on an MSK transaction.
+ * @param transaction - The Firestore transaction.
+ * @param firestore - The Firestore instance.
+ * @param msk - The MSK data.
+ * @param change - The stock change amount (+qty for addition, -qty for reversal).
+ */
+async function updateInventoryForMsk(transaction: Transaction, firestore: any, msk: Omit<Msk, 'id' | 'harga'>, change: number) {
+    if (change === 0) return;
+
+    const inventoryCol = collection(firestore, 'inventory');
+    const q = query(inventoryCol, where("part", "==", msk.part));
+    const inventorySnapshot = await transaction.get(q);
+
+    if (inventorySnapshot.empty) {
+        if (change > 0) {
+            // Part doesn't exist, create a new inventory item.
+            const newInventoryRef = doc(inventoryCol);
+            const newInventoryItem: Omit<InventoryItem, 'id'> = {
+                part: msk.part,
+                deskripsi: msk.deskripsi,
+                qty_baik: change,
+                available_qty: change,
+                qty_rusak: 0,
+                qty_real: change,
+                harga_dpp: 0, // Should be updated later if possible
+                ppn: 0,
+                total_harga: 0,
+                lokasi: 'BARU',
+                satuan: 'pcs',
+                return_to_factory: 0,
+            };
+            transaction.set(newInventoryRef, newInventoryItem);
+        } else {
+            // Trying to reverse stock for a non-existent part, which is an error.
+            throw new Error(`Part ${msk.part} tidak ditemukan di Report Stock untuk mengurangi stok.`);
+        }
+    } else {
+        // Part exists, update it.
+        const inventoryDoc = inventorySnapshot.docs[0];
+        const inventoryRef = inventoryDoc.ref;
+        const currentInventory = inventoryDoc.data() as InventoryItem;
+
+        const newQtyBaik = currentInventory.qty_baik + change;
+        if (newQtyBaik < 0) {
+            throw new Error(`Stok 'baik' untuk part ${msk.part} menjadi negatif.`);
+        }
+        const newAvailableQty = currentInventory.available_qty + change;
+        const newQtyReal = newQtyBaik + currentInventory.qty_rusak;
+
+        transaction.update(inventoryRef, {
+            qty_baik: newQtyBaik,
+            available_qty: newAvailableQty,
+            qty_real: newQtyReal,
+        });
+    }
+}
+
 
 export default function MskClient() {
   const { toast } = useToast();
@@ -182,11 +241,27 @@ export default function MskClient() {
   const confirmDelete = async () => {
     if (!selectedMsk || !selectedMsk.id || !firestore) return;
     try {
-      await deleteDoc(doc(firestore, 'msk', selectedMsk.id));
-      toast({ title: "Sukses", description: "Data MSK telah dihapus." });
-    } catch (error) {
+        await runTransaction(firestore, async (transaction) => {
+            const mskRef = doc(firestore, 'msk', selectedMsk.id!);
+            const mskDoc = await transaction.get(mskRef);
+            if (!mskDoc.exists()) {
+                throw new Error("Dokumen MSK tidak ditemukan.");
+            }
+            const mskData = mskDoc.data() as Msk;
+
+            transaction.delete(mskRef);
+
+            const wasStockAdded = mskData.status_msk === 'RECEIVED';
+            if (wasStockAdded) {
+                await updateInventoryForMsk(transaction, firestore, mskData, -mskData.qty_msk);
+            }
+        });
+        
+        toast({ title: "Sukses", description: "Data MSK telah dihapus dan stok telah dikembalikan (jika perlu)." });
+
+    } catch (error: any) {
       console.error("Error deleting document: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus data MSK." });
+      toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menghapus data MSK." });
     } finally {
       setIsDeleting(false);
       setSelectedMsk(null);
@@ -200,54 +275,42 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
 
     try {
         await runTransaction(firestore, async (transaction) => {
-            let mskRef;
-            const originalStatus = isEditing ? selectedMsk.status_msk : null;
-            const newStatus = values.status_msk;
+            const mskDataForStockLogic: Omit<Msk, 'id'> & { id?: string } = {
+                ...values,
+                tanggal_msk: isEditing ? selectedMsk.tanggal_msk : new Date().toISOString().split('T')[0],
+            };
 
             if (isEditing) {
-                mskRef = doc(firestore, 'msk', selectedMsk.id!);
+                const mskRef = doc(firestore, 'msk', selectedMsk.id!);
+                const originalMskDoc = await transaction.get(mskRef);
+                if (!originalMskDoc.exists()) throw new Error("Dokumen MSK tidak ditemukan.");
+                const originalMsk = originalMskDoc.data() as Msk;
+                
                 transaction.update(mskRef, { ...values });
-            } else {
-                const newMsk: Omit<Msk, 'id' | 'harga'> = {
-                    part: values.part,
-                    deskripsi: values.deskripsi,
-                    qty_msk: values.qty_msk,
-                    status_msk: values.status_msk,
-                    site_msk: values.site_msk,
-                    tanggal_msk: new Date().toISOString().split('T')[0],
-                    no_transaksi: values.no_transaksi,
-                    keterangan: values.keterangan || '',
-                };
-                mskRef = doc(collection(firestore, 'msk'));
-                transaction.set(mskRef, newMsk);
-            }
 
-            const isStockAdded = originalStatus === 'RECEIVED';
-            const willStockBeAdded = newStatus === 'RECEIVED';
+                const wasStockAdded = originalMsk.status_msk === 'RECEIVED';
+                const willStockBeAdded = values.status_msk === 'RECEIVED';
 
-            if (isStockAdded !== willStockBeAdded) {
-                const inventoryCol = collection(firestore, 'inventory');
-                const q = query(inventoryCol, where("part", "==", values.part));
-                const inventorySnapshot = await transaction.get(q);
-
-                if (inventorySnapshot.empty) {
-                    throw new Error(`Part ${values.part} tidak ditemukan di Report Stock.`);
+                let stockChange = 0;
+                if (willStockBeAdded && !wasStockAdded) {
+                    stockChange = values.qty_msk; // Add new quantity
+                } else if (!willStockBeAdded && wasStockAdded) {
+                    stockChange = -originalMsk.qty_msk; // Reverse old quantity
+                } else if (willStockBeAdded && wasStockAdded && values.qty_msk !== originalMsk.qty_msk) {
+                    stockChange = values.qty_msk - originalMsk.qty_msk; // Adjust quantity difference
                 }
 
-                const inventoryDoc = inventorySnapshot.docs[0];
-                const inventoryRef = inventoryDoc.ref;
-                const currentInventory = inventoryDoc.data() as InventoryItem;
+                if (stockChange !== 0) {
+                   await updateInventoryForMsk(transaction, firestore, mskDataForStockLogic, stockChange);
+                }
 
-                const stockChange = willStockBeAdded ? values.qty_msk : -values.qty_msk;
-
-                const newQtyBaik = currentInventory.qty_baik + stockChange;
-                const newAvailableQty = currentInventory.available_qty + stockChange;
-
-                transaction.update(inventoryRef, {
-                    qty_baik: newQtyBaik,
-                    available_qty: newAvailableQty,
-                    qty_real: newQtyBaik + currentInventory.qty_rusak,
-                });
+            } else { // Adding new MSK
+                const newMskRef = doc(collection(firestore, 'msk'));
+                transaction.set(newMskRef, mskDataForStockLogic);
+                
+                if (values.status_msk === 'RECEIVED') {
+                    await updateInventoryForMsk(transaction, firestore, mskDataForStockLogic, values.qty_msk);
+                }
             }
         });
 
@@ -306,7 +369,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
             <FormItem><FormLabel>Part</FormLabel><FormControl><Input placeholder="PN-001" {...field} disabled={isEdit} /></FormControl><FormMessage /></FormItem>
         )}/>
         <FormField control={form.control} name="deskripsi" render={({ field }) => (
-            <FormItem><FormLabel>Deskripsi</FormLabel><FormControl><Input placeholder="Otomatis terisi" {...field} readOnly className="bg-muted" /></FormControl><FormMessage /></FormItem>
+            <FormItem><FormLabel>Deskripsi</FormLabel><FormControl><Input placeholder="Deskripsi Part" {...field} /></FormControl><FormMessage /></FormItem>
         )}/>
         <FormField control={form.control} name="qty_msk" render={({ field }) => (
             <FormItem><FormLabel>Qty</FormLabel><FormControl><Input type="number" {...field} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'} /></FormControl><FormMessage /></FormItem>
@@ -320,9 +383,9 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
             render={({ field }) => (
                 <FormItem>
                     <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={!isEdit && isAddModalOpen}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
-                            <SelectTrigger className={(!isEdit && isAddModalOpen) ? "bg-muted" : ""}>
+                            <SelectTrigger>
                                 <SelectValue placeholder="Pilih Status" />
                             </SelectTrigger>
                         </FormControl>
@@ -378,7 +441,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
                 qty_msk: 1,
                 harga: 0,
                 site_msk: "",
-                no_transaksi: "",
+                no_transaksi: `TRX-MSK-${Date.now()}`,
                 status_msk: "BON",
                 keterangan: "",
               }); 
@@ -460,7 +523,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
           <AlertDialogHeader>
             <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
             <AlertDialogDescription>
-              Tindakan ini akan menghapus data MSK untuk <strong>{selectedMsk?.part}</strong> dengan nomor transaksi <strong>{selectedMsk?.no_transaksi}</strong>. Data yang dihapus tidak dapat dipulihkan.
+              Tindakan ini akan menghapus data MSK untuk <strong>{selectedMsk?.part}</strong>. Jika stok sudah ditambahkan, maka akan dikembalikan.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -534,5 +597,3 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
     </>
   );
 }
-
-    
