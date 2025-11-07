@@ -67,6 +67,7 @@ const addSchema = z.object({
 
 const editSchema = z.object({
   status_bonpds: z.enum(["BON", "RECEIVED", "CANCELED"]),
+  no_transaksi: z.string().min(1, "No. Transaksi wajib diisi"),
   keterangan: z.string().optional(),
 });
 
@@ -160,6 +161,7 @@ export default function BonPdsClient() {
         setSelectedBon(bon);
         editForm.reset({
             status_bonpds: bon.status_bonpds,
+            no_transaksi: bon.no_transaksi || '',
             keterangan: bon.keterangan || '',
         });
         setIsEditModalOpen(true);
@@ -202,7 +204,7 @@ export default function BonPdsClient() {
         status_bonpds: 'BON',
         site_bonpds: values.site_bonpds,
         tanggal_bonpds: new Date().toISOString().split('T')[0],
-        no_transaksi: `TRX-PDS-2024-${String((data?.length || 0) + 1).padStart(3, '0')}`,
+        no_transaksi: `TRX-PDS-${Date.now()}`,
         keterangan: values.keterangan || '',
     };
     
@@ -225,6 +227,7 @@ export default function BonPdsClient() {
     try {
       await updateDoc(bonRef, {
         status_bonpds: values.status_bonpds,
+        no_transaksi: values.no_transaksi,
         keterangan: values.keterangan
       });
       toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
@@ -515,6 +518,19 @@ export default function BonPdsClient() {
                                             <SelectItem value="CANCELED">CANCELED</SelectItem>
                                         </SelectContent>
                                     </Select>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                        <FormField
+                            control={editForm.control}
+                            name="no_transaksi"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>No. Transaksi</FormLabel>
+                                    <FormControl>
+                                        <Input placeholder="TRX-PDS-..." {...field} value={field.value ?? ''} />
+                                    </FormControl>
                                     <FormMessage />
                                 </FormItem>
                             )}
