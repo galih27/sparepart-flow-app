@@ -16,7 +16,6 @@ export type InventoryItem = {
 
 export type User = {
   id?: string; // ID from Firestore
-  id_user: string;
   users: string;
   nik: string;
   nama_teknisi: string;

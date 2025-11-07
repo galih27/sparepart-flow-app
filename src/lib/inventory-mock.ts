@@ -8,7 +8,6 @@ export const inventoryData: Omit<InventoryItem, 'id'>[] = Array.from({ length: 5
     const qty_baik = Math.floor(Math.random() * 100);
     const qty_rusak = Math.floor(Math.random() * 10);
     return {
-      id_inventory: `inv-${id}`,
       part: partNumber,
       deskripsi: `Deskripsi untuk ${partNumber}`,
       harga_dpp: dpp,

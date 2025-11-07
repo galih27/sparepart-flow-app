@@ -116,7 +116,8 @@ export default function UserRolesClient() {
       const batch = writeBatch(firestore);
       usersMockData.forEach((user) => {
         const { password, ...userData } = user;
-        const docRef = doc(firestore, "users", user.id_user); 
+        // Let firestore create a unique ID
+        const docRef = doc(collection(firestore, "users")); 
         batch.set(docRef, userData);
       });
       await batch.commit();
@@ -159,7 +160,6 @@ export default function UserRolesClient() {
 
       // 2. Save user data to Firestore, using the auth UID as the document ID
       const newUser: Omit<User, 'id' | 'password'> = {
-        id_user: authUser.uid,
         users: values.email.split('@')[0],
         nik: values.nik,
         nama_teknisi: values.nama_teknisi,
