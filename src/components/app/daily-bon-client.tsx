@@ -8,7 +8,7 @@ import * as z from "zod";
 import { Plus, Pencil, Eye } from 'lucide-react';
 import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
-import { useCollection, useFirestore } from '@/firebase';
+import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
 import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
@@ -72,6 +72,14 @@ const ITEMS_PER_PAGE = 10;
 export default function DailyBonClient() {
   const { toast } = useToast();
   const firestore = useFirestore();
+  const { user: authUser } = useUser();
+
+  const userDocRef = useMemo(() => {
+    if (!firestore || !authUser) return null;
+    return doc(firestore, 'users', authUser.uid);
+  }, [firestore, authUser]);
+
+  const { data: currentUser, isLoading: isLoadingUser } = useDoc<User>(userDocRef);
 
   const bonQuery = useMemo(() => firestore ? collection(firestore, 'daily_bon') : null, [firestore]);
   const usersQuery = useMemo(() => firestore ? collection(firestore, 'users') : null, [firestore]);
@@ -141,7 +149,7 @@ export default function DailyBonClient() {
   
   async function onAddSubmit(values: z.infer<typeof addSchema>) {
     if (!firestore) return;
-    const newBon: Omit<DailyBon, 'id' | 'id_dailybon'> = {
+    const newBon: Omit<DailyBon, 'id'> = {
         part: values.part,
         deskripsi: values.deskripsi,
         qty_dailybon: values.qty_dailybon,
@@ -211,7 +219,37 @@ export default function DailyBonClient() {
     'CANCELED': 'destructive'
   } as const;
 
-  const isLoading = isLoadingData || isLoadingUsers || isLoadingInventory;
+  const isLoading = isLoadingData || isLoadingUsers || isLoadingInventory || isLoadingUser;
+
+  const userRole = currentUser?.role;
+  const isAdmin = userRole === 'Admin';
+
+  const renderActionCell = (item: DailyBon) => {
+    const isFinalStatus = item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED';
+    
+    if (isAdmin) {
+      return (
+        <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+          <Pencil className="h-4 w-4" />
+        </Button>
+      );
+    }
+
+    if (isFinalStatus) {
+      return (
+        <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+          <Eye className="h-4 w-4" />
+        </Button>
+      );
+    }
+
+    return (
+      <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+        <Pencil className="h-4 w-4" />
+      </Button>
+    );
+  };
+
 
   return (
     <>
@@ -290,15 +328,7 @@ export default function DailyBonClient() {
               ) : (paginatedData.map(item => (
                 <TableRow key={item.id}>
                   <TableCell>
-                    {item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED' ? (
-                        <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-                            <Eye className="h-4 w-4" />
-                        </Button>
-                    ) : (
-                        <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
-                            <Pencil className="h-4 w-4" />
-                        </Button>
-                    )}
+                    {renderActionCell(item)}
                   </TableCell>
                   <TableCell className="font-medium">{item.part}</TableCell>
                   <TableCell>{item.deskripsi}</TableCell>
@@ -553,5 +583,3 @@ export default function DailyBonClient() {
     </>
   );
 }
-
-    
