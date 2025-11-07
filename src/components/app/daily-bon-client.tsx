@@ -4,11 +4,11 @@ import { useState, useMemo, useEffect } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import * as z from "zod";
-import { Plus } from 'lucide-react';
+import { Plus, Pencil } from 'lucide-react';
 import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore } from '@/firebase';
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -60,6 +60,11 @@ const addSchema = z.object({
   keterangan: z.string().optional(),
 });
 
+const editSchema = z.object({
+  status_bon: z.enum(["BON", "RECEIVED", "KMP", "CANCELED"]),
+  no_tkl: z.string().optional(),
+})
+
 const ITEMS_PER_PAGE = 10;
 
 export default function DailyBonClient() {
@@ -77,9 +82,11 @@ export default function DailyBonClient() {
   const [filterTeknisi, setFilterTeknisi] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedBon, setSelectedBon] = useState<DailyBon | null>(null);
 
-  const form = useForm<z.infer<typeof addSchema>>({
+  const addForm = useForm<z.infer<typeof addSchema>>({
     resolver: zodResolver(addSchema),
     defaultValues: {
       part: "",
@@ -91,20 +98,24 @@ export default function DailyBonClient() {
     },
   });
 
-  const watchedPart = useWatch({ control: form.control, name: "part" });
+  const editForm = useForm<z.infer<typeof editSchema>>({
+    resolver: zodResolver(editSchema),
+  });
+
+  const watchedPart = useWatch({ control: addForm.control, name: "part" });
 
   useEffect(() => {
     if (inventory) {
       const inventoryItem = inventory.find(item => item.part.toLowerCase() === watchedPart.toLowerCase());
       if (inventoryItem) {
-        form.setValue("deskripsi", inventoryItem.deskripsi);
-        form.setValue("harga", inventoryItem.total_harga);
+        addForm.setValue("deskripsi", inventoryItem.deskripsi);
+        addForm.setValue("harga", inventoryItem.total_harga);
       } else {
-        form.setValue("deskripsi", "");
-        form.setValue("harga", 0);
+        addForm.setValue("deskripsi", "");
+        addForm.setValue("harga", 0);
       }
     }
-  }, [watchedPart, inventory, form]);
+  }, [watchedPart, inventory, addForm]);
 
 
   const filteredData = useMemo(() => {
@@ -125,7 +136,7 @@ export default function DailyBonClient() {
     return filteredData.slice(start, end);
   }, [filteredData, currentPage]);
   
-  async function onSubmit(values: z.infer<typeof addSchema>) {
+  async function onAddSubmit(values: z.infer<typeof addSchema>) {
     if (!firestore) return;
     const newBon: Omit<DailyBon, 'id' | 'id_dailybon'> = {
         part: values.part,
@@ -135,20 +146,49 @@ export default function DailyBonClient() {
         status_bon: 'BON',
         teknisi: values.teknisi,
         tanggal_dailybon: new Date().toISOString().split('T')[0],
-        no_tkl: `TKL-2024-${String((data?.length || 0) + 1).padStart(4, '0')}`,
+        no_tkl: '', // Set to empty string on creation
         keterangan: values.keterangan || '',
     };
     
     try {
         await addDoc(collection(firestore, 'daily_bon'), newBon);
         toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan." });
-        setIsModalOpen(false);
-        form.reset();
+        setIsAddModalOpen(false);
+        addForm.reset();
     } catch (error) {
         console.error("Error adding document: ", error);
         toast({ variant: "destructive", title: "Gagal", description: "Gagal menambahkan data bon harian." });
     }
   }
+
+  const handleEdit = (bon: DailyBon) => {
+    setSelectedBon(bon);
+    editForm.reset({
+      status_bon: bon.status_bon,
+      no_tkl: bon.no_tkl || '',
+    });
+    setIsEditModalOpen(true);
+  };
+  
+  async function onEditSubmit(values: z.infer<typeof editSchema>) {
+    if (!firestore || !selectedBon || !selectedBon.id) return;
+  
+    const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
+  
+    try {
+      await updateDoc(bonRef, {
+        status_bon: values.status_bon,
+        no_tkl: values.no_tkl,
+      });
+      toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
+      setIsEditModalOpen(false);
+      setSelectedBon(null);
+    } catch (error) {
+      console.error("Error updating document: ", error);
+      toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui status bon." });
+    }
+  }
+
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
@@ -192,7 +232,7 @@ export default function DailyBonClient() {
               </SelectContent>
             </Select>
 
-          <Button onClick={() => setIsModalOpen(true)}>
+          <Button onClick={() => setIsAddModalOpen(true)}>
             <Plus className="mr-2 h-4 w-4" /> Tambah
           </Button>
         </div>
@@ -203,6 +243,7 @@ export default function DailyBonClient() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>Action</TableHead>
                 <TableHead>Part</TableHead>
                 <TableHead>Deskripsi</TableHead>
                 <TableHead>Qty</TableHead>
@@ -218,6 +259,7 @@ export default function DailyBonClient() {
               {isLoading ? (
                  Array.from({ length: 5 }).map((_, index) => (
                     <TableRow key={index}>
+                        <TableCell><Skeleton className="h-8 w-8" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
@@ -231,12 +273,17 @@ export default function DailyBonClient() {
                  ))
               ) : paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center h-24">
+                  <TableCell colSpan={10} className="text-center h-24">
                     Tidak ada data bon harian.
                   </TableCell>
                 </TableRow>
               ) : (paginatedData.map(item => (
                 <TableRow key={item.id}>
+                  <TableCell>
+                      <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+                          <Pencil className="h-4 w-4" />
+                      </Button>
+                  </TableCell>
                   <TableCell className="font-medium">{item.part}</TableCell>
                   <TableCell>{item.deskripsi}</TableCell>
                   <TableCell>{item.qty_dailybon}</TableCell>
@@ -262,16 +309,16 @@ export default function DailyBonClient() {
         </div>
       </div>
 
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Tambah Daily Bon</DialogTitle>
             <DialogDescription>Isi form untuk menambah transaksi sparepart keluar.</DialogDescription>
           </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
+          <Form {...addForm}>
+            <form onSubmit={addForm.handleSubmit(onAddSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
               <FormField
-                control={form.control}
+                control={addForm.control}
                 name="part"
                 render={({ field }) => (
                   <FormItem className="md:col-span-1">
@@ -284,7 +331,7 @@ export default function DailyBonClient() {
                 )}
               />
               <FormField
-                control={form.control}
+                control={addForm.control}
                 name="deskripsi"
                 render={({ field }) => (
                   <FormItem className="md:col-span-1">
@@ -297,7 +344,7 @@ export default function DailyBonClient() {
                 )}
               />
               <FormField
-                control={form.control}
+                control={addForm.control}
                 name="qty_dailybon"
                 render={({ field }) => (
                   <FormItem>
@@ -310,7 +357,7 @@ export default function DailyBonClient() {
                 )}
               />
               <FormField
-                control={form.control}
+                control={addForm.control}
                 name="harga"
                 render={({ field }) => (
                   <FormItem>
@@ -327,7 +374,7 @@ export default function DailyBonClient() {
                 <Input value="BON" readOnly disabled className="bg-muted"/>
               </div>
               <FormField
-                control={form.control}
+                control={addForm.control}
                 name="teknisi"
                 render={({ field }) => (
                   <FormItem>
@@ -349,7 +396,7 @@ export default function DailyBonClient() {
                 )}
               />
               <FormField
-                control={form.control}
+                control={addForm.control}
                 name="keterangan"
                 render={({ field }) => (
                   <FormItem className="md:col-span-2">
@@ -371,6 +418,63 @@ export default function DailyBonClient() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {selectedBon && (
+        <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Update Status Bon</DialogTitle>
+                    <DialogDescription>Update status untuk part {selectedBon.part}.</DialogDescription>
+                </DialogHeader>
+                <Form {...editForm}>
+                    <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4 py-4">
+                        <FormField
+                            control={editForm.control}
+                            name="status_bon"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Status Bon</FormLabel>
+                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                        <FormControl>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Pilih Status" />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            <SelectItem value="BON">BON</SelectItem>
+                                            <SelectItem value="RECEIVED">RECEIVED</SelectItem>
+                                            <SelectItem value="KMP">KMP</SelectItem>
+                                            <SelectItem value="CANCELED">CANCELED</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                        <FormField
+                            control={editForm.control}
+                            name="no_tkl"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>No. TKL</FormLabel>
+                                    <FormControl>
+                                        <Input placeholder="Isi No. TKL jika ada" {...field} />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                        <DialogFooter>
+                            <DialogClose asChild>
+                                <Button type="button" variant="secondary">Batal</Button>
+                            </DialogClose>
+                            <Button type="submit">Simpan Perubahan</Button>
+                        </DialogFooter>
+                    </form>
+                </Form>
+            </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }

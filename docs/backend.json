@@ -48,64 +48,12 @@
         "no_tkl": { "type": "string" },
         "keterangan": { "type": "string" }
       },
-      "required": ["part", "qty_dailybon", "status_bon", "teknisi", "tanggal_dailybon", "no_tkl"]
+      "required": ["part", "qty_dailybon", "status_bon", "teknisi", "tanggal_dailybon"]
     },
     "BonPDS": {
       "title": "Bon PDS",
       "description": "Represents a spare part transfer to another site.",
-      "type": "object",
-      "properties": {
-        "part": { "type": "string" },
-        "deskripsi": { "type": "string" },
-        "qty_bonpds": { "type": "number" },
-        "status_bonpds": { "type": "string", "enum": ["BON", "RECEIVED", "CANCELED"] },
-        "site_bonpds": { "type": "string" },
-        "tanggal_bonpds": { "type": "string", "format": "date" },
-        "no_transaksi": { "type": "string" },
-        "keterangan": { "type": "string" }
-      },
-      "required": ["part", "qty_bonpds", "status_bonpds", "site_bonpds", "tanggal_bonpds", "no_transaksi"]
-    },
-    "Msk": {
-      "title": "MSK",
-      "description": "Represents an incoming spare part shipment.",
-      "type": "object",
-      "properties": {
-        "part": { "type": "string" },
-        "deskripsi": { "type": "string" },
-        "qty_msk": { "type": "number" },
-        "status_msk": { "type": "string", "enum": ["BON", "RECEIVED", "CANCELED"] },
-        "site_msk": { "type": "string" },
-        "tanggal_msk": { "type": "string", "format": "date" },
-        "no_transaksi": { "type": "string" },
-        "keterangan": { "type": "string" }
-      },
-      "required": ["part", "qty_msk", "status_msk", "site_msk", "tanggal_msk", "no_transaksi"]
-    }
-  },
-  "auth": {
-    "providers": ["password"]
-  },
-  "firestore": {
-    "/inventory": {
-      "schema": { "$ref": "#/entities/InventoryItem" },
-      "description": "Collection of all inventory items."
-    },
-    "/users": {
-      "schema": { "$ref": "#/entities/User" },
-      "description": "Collection of all users."
-    },
-    "/daily_bon": {
-      "schema": { "$ref": "#/entities/DailyBon" },
-      "description": "Collection of all daily bon transactions."
-    },
-    "/bon_pds": {
-      "schema": { "$ref": "#/entities/BonPDS" },
-      "description": "Collection of all bon PDS transactions."
-    },
-    "/msk": {
-      "schema": { "$ref": "#/entities/Msk" },
-      "description": "Collection of all MSK transactions."
+      "type": "object"
     }
   }
 }
