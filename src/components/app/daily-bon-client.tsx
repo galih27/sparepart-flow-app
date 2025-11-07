@@ -292,14 +292,11 @@ export default function DailyBonClient() {
       <PageHeader title="Daily Bon">
         <div className="flex items-center gap-2">
             <Select 
-              value={currentUser?.role === 'Teknisi' ? currentUser.nama_teknisi : filterTeknisi}
+              value={filterTeknisi}
               onValueChange={(value) => {
-                if (currentUser?.role !== 'Teknisi') {
-                  setFilterTeknisi(value === 'all' ? '' : value);
-                  setCurrentPage(1);
-                }
+                setFilterTeknisi(value === 'all' ? '' : value);
+                setCurrentPage(1);
               }}
-              disabled={currentUser?.role === 'Teknisi'}
             >
                 <SelectTrigger className="w-[180px] bg-background">
                     <SelectValue placeholder="Filter Teknisi" />
@@ -648,6 +645,8 @@ export default function DailyBonClient() {
     </>
   );
 }
+
+    
 
     
 
