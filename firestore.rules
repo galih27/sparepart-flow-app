@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow read/write access to all collections for any authenticated user.
+    // This is not recommended for production, but is useful for development.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "entities": {
+    "InventoryItem": {
+      "title": "Inventory Item",
+      "description": "Represents a spare part in the inventory.",
+      "type": "object",
+      "properties": {
+        "part": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "harga_dpp": { "type": "number" },
+        "ppn": { "type": "number" },
+        "total_harga": { "type": "number" },
+        "satuan": { "type": "string" },
+        "available_qty": { "type": "number" },
+        "qty_baik": { "type": "number" },
+        "qty_rusak": { "type": "number" },
+        "lokasi": { "type": "string" },
+        "return_to_factory": { "type": "number" },
+        "qty_real": { "type": "number" }
+      },
+      "required": ["part", "deskripsi", "total_harga", "available_qty", "qty_baik", "qty_rusak", "lokasi"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Represents a user of the application.",
+      "type": "object",
+      "properties": {
+        "users": { "type": "string" },
+        "nik": { "type": "string" },
+        "nama_teknisi": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["Admin", "Teknisi", "Manager"] }
+      },
+      "required": ["users", "nik", "nama_teknisi", "email", "role"]
+    },
+    "DailyBon": {
+      "title": "Daily Bon",
+      "description": "Represents a daily spare part request.",
+      "type": "object",
+      "properties": {
+        "part": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "qty_dailybon": { "type": "number" },
+        "harga": { "type": "number" },
+        "status_bon": { "type": "string", "enum": ["BON", "RECEIVED", "KMP", "CANCELED"] },
+        "teknisi": { "type": "string" },
+        "tanggal_dailybon": { "type": "string", "format": "date" },
+        "no_tkl": { "type": "string" },
+        "keterangan": { "type": "string" }
+      },
+      "required": ["part", "qty_dailybon", "status_bon", "teknisi", "tanggal_dailybon", "no_tkl"]
+    },
+    "BonPDS": {
+      "title": "Bon PDS",
+      "description": "Represents a spare part transfer to another site.",
+      "type": "object",
+      "properties": {
+        "part": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "qty_bonpds": { "type": "number" },
+        "status_bonpds": { "type": "string", "enum": ["BON", "RECEIVED", "CANCELED"] },
+        "site_bonpds": { "type": "string" },
+        "tanggal_bonpds": { "type": "string", "format": "date" },
+        "no_transaksi": { "type": "string" },
+        "keterangan": { "type": "string" }
+      },
+      "required": ["part", "qty_bonpds", "status_bonpds", "site_bonpds", "tanggal_bonpds", "no_transaksi"]
+    },
+    "Msk": {
+      "title": "MSK",
+      "description": "Represents an incoming spare part shipment.",
+      "type": "object",
+      "properties": {
+        "part": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "qty_msk": { "type": "number" },
+        "status_msk": { "type": "string", "enum": ["BON", "RECEIVED", "CANCELED"] },
+        "site_msk": { "type": "string" },
+        "tanggal_msk": { "type": "string", "format": "date" },
+        "no_transaksi": { "type": "string" },
+        "keterangan": { "type": "string" }
+      },
+      "required": ["part", "qty_msk", "status_msk", "site_msk", "tanggal_msk", "no_transaksi"]
+    }
+  },
+  "auth": {
+    "providers": ["password"]
+  },
+  "firestore": {
+    "/inventory": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Collection of all inventory items."
+    },
+    "/users": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Collection of all users."
+    },
+    "/daily_bon": {
+      "schema": { "$ref": "#/entities/DailyBon" },
+      "description": "Collection of all daily bon transactions."
+    },
+    "/bon_pds": {
+      "schema": { "$ref": "#/entities/BonPDS" },
+      "description": "Collection of all bon PDS transactions."
+    },
+    "/msk": {
+      "schema": { "$ref": "#/entities/Msk" },
+      "description": "Collection of all MSK transactions."
+    }
+  }
+}
