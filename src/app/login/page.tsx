@@ -41,7 +41,7 @@ export default function LoginPage() {
           title: "Login Berhasil",
           description: `Selamat datang kembali, ${user.nama_teknisi}!`,
         });
-        router.push(`/?user=${encodeURIComponent(user.nama_teknisi)}`);
+        router.push(`/`);
       } else {
         toast({
           variant: "destructive",

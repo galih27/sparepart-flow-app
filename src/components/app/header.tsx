@@ -26,7 +26,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 function HeaderContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const userName = searchParams.get("user") || "User";
+  const userName = "Admin";
   const userAvatar = PlaceHolderImages.find((img) => img.id === "user-avatar");
 
   const handleLogout = () => {

@@ -1,6 +1,7 @@
 "use client";
 
-import { usePathname, useSearchParams, Suspense } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { Suspense } from "react";
 import Link from "next/link";
 import {
   SidebarContent,
@@ -28,15 +29,9 @@ const menuItems = [
 
 function SidebarNavContent() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const user = searchParams.get('user');
 
   const createHref = (href: string) => {
-    const params = new URLSearchParams();
-    if (user) {
-      params.append('user', user);
-    }
-    return `${href}?${params.toString()}`;
+    return href;
   }
 
   return (
