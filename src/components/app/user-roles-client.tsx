@@ -114,6 +114,7 @@ export default function UserRolesClient() {
     try {
       const batch = writeBatch(firestore);
       usersMockData.forEach((user) => {
+        // For mock data, we can create a new doc ref to get an ID
         const docRef = doc(collection(firestore, "users"));
         const { password, ...userData } = user;
         batch.set(docRef, userData);
@@ -144,14 +145,19 @@ export default function UserRolesClient() {
   }
 
   async function onAddSubmit(values: z.infer<typeof addSchema>) {
-    if (!auth || !firestore) return;
+    if (!auth || !firestore) {
+      toast({ variant: "destructive", title: "Gagal", description: "Layanan otentikasi atau database tidak tersedia." });
+      return;
+    }
+    
+    addForm.formState.isSubmitting = true;
 
     try {
       // 1. Create user in Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.password);
       const authUser = userCredential.user;
 
-      // 2. Save user data to Firestore
+      // 2. Save user data to Firestore, using the auth UID as the document ID
       const newUser: Omit<User, 'id' | 'password'> = {
         id_user: authUser.uid,
         users: values.email.split('@')[0],
@@ -171,8 +177,10 @@ export default function UserRolesClient() {
       console.error("Error adding user:", error);
       const errorMessage = error.code === 'auth/email-already-in-use' 
         ? "Email ini sudah terdaftar."
-        : "Gagal menambahkan pengguna baru.";
+        : "Gagal menambahkan pengguna baru. Periksa konsol untuk detailnya.";
       toast({ variant: "destructive", title: "Gagal", description: errorMessage });
+    } finally {
+        addForm.formState.isSubmitting = false;
     }
   }
   
