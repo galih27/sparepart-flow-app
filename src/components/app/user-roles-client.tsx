@@ -4,13 +4,12 @@ import { useState, useMemo } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { FileUp, Pencil, Plus } from 'lucide-react';
+import { Pencil, Plus } from 'lucide-react';
 import type { User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCollection, useFirestore } from '@/firebase';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { collection, doc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { usersMockData } from '@/lib/users-mock';
+import { collection, doc, setDoc, updateDoc } from 'firebase/firestore';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -75,7 +74,6 @@ export default function UserRolesClient() {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
@@ -98,36 +96,6 @@ export default function UserRolesClient() {
     setSelectedUser(user);
     editForm.setValue("role", user.role);
     setIsEditModalOpen(true);
-  };
-  
-  const handleImport = async () => {
-    if (!firestore) {
-      toast({ variant: "destructive", title: "Gagal", description: "Koneksi Firestore tidak tersedia." });
-      return;
-    }
-    if (data && data.length > 0) {
-      toast({ variant: "destructive", title: "Gagal", description: "Data pengguna sudah ada. Hapus data lama untuk mengimpor." });
-      return;
-    }
-    setIsImporting(true);
-    toast({ title: "Mengimpor Data", description: "Mohon tunggu, data pengguna sedang diimpor..." });
-
-    try {
-      const batch = writeBatch(firestore);
-      usersMockData.forEach((user) => {
-        const { password, ...userData } = user;
-        // Let firestore create a unique ID
-        const docRef = doc(collection(firestore, "users")); 
-        batch.set(docRef, userData);
-      });
-      await batch.commit();
-      toast({ title: "Sukses", description: `${usersMockData.length} data pengguna berhasil diimpor.` });
-    } catch (error) {
-      console.error("Error importing data: ", error);
-      toast({ variant: "destructive", title: "Gagal Impor", description: "Terjadi kesalahan saat mengimpor data." });
-    } finally {
-      setIsImporting(false);
-    }
   };
 
   async function onEditSubmit(values: z.infer<typeof editSchema>) {
@@ -193,14 +161,9 @@ export default function UserRolesClient() {
   return (
     <>
       <PageHeader title="User Role Management">
-        <div className='flex items-center gap-2'>
-            <Button variant="outline" onClick={handleImport} disabled={isImporting || (data && data.length > 0)}>
-              <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Import Users'}
-            </Button>
-            <Button onClick={() => setIsAddModalOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" /> Tambah User
-            </Button>
-        </div>
+        <Button onClick={() => setIsAddModalOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Tambah User
+        </Button>
       </PageHeader>
       <div className="p-4 md:p-6">
         <div className="border rounded-lg">
@@ -228,7 +191,7 @@ export default function UserRolesClient() {
               ) : !data || data.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center h-24">
-                    Tidak ada data pengguna. Klik 'Import Users' untuk memulai.
+                    Tidak ada data pengguna. Klik 'Tambah User' untuk memulai.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -328,7 +291,7 @@ export default function UserRolesClient() {
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Pilih Role" />
-                          </Trigger>
+                          </SelectTrigger>
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="Admin">Admin</SelectItem>
