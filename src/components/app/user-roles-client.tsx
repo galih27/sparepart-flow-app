@@ -164,7 +164,7 @@ export default function UserRolesClient() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isAddUser, setIsAddUser] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const editForm = useForm<z.infer<typeof editSchema>>({
@@ -249,7 +249,7 @@ export default function UserRolesClient() {
       return;
     }
     
-    setIsAddUser(true);
+    setIsSubmitting(true);
 
     try {
       // 1. Create user in Firebase Auth
@@ -280,7 +280,7 @@ export default function UserRolesClient() {
         : "Gagal menambahkan pengguna baru. Periksa konsol untuk detailnya.";
       toast({ variant: "destructive", title: "Gagal", description: errorMessage });
     } finally {
-        setIsAddUser(false);
+        setIsSubmitting(false);
     }
   }
   
@@ -458,7 +458,7 @@ export default function UserRolesClient() {
       )}
 
       {/* Add User Modal */}
-      <Dialog open={isAddUser} onOpenChange={setIsAddUser}>
+      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Tambah Pengguna Baru</DialogTitle>
@@ -505,8 +505,8 @@ export default function UserRolesClient() {
                 <DialogClose asChild>
                   <Button type="button" variant="secondary" onClick={() => addForm.reset()}>Batal</Button>
                 </DialogClose>
-                <Button type="submit" disabled={isAddUser}>
-                  {isAddUser ? "Menyimpan..." : "Simpan Pengguna"}
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? "Menyimpan..." : "Simpan Pengguna"}
                 </Button>
               </DialogFooter>
             </form>
@@ -516,3 +516,5 @@ export default function UserRolesClient() {
     </>
   );
 }
+
+    
