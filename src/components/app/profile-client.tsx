@@ -22,6 +22,9 @@ import { useUser, useAuth, useDoc, useFirestore, useFirebaseApp } from "@/fireba
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@/lib/definitions";
 import type { Area } from 'react-easy-crop';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
+
 
 import PageHeader from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
@@ -166,12 +169,12 @@ export default function ProfileClient() {
         description: "Foto profil berhasil diperbarui.",
       });
     } catch (error: any) {
-      console.error("Error saving cropped image:", error);
-      toast({
-        variant: "destructive",
-        title: "Gagal Menyimpan",
-        description: `Terjadi kesalahan saat menyimpan foto profil baru: ${error.message}`,
-      });
+        const permissionError = new FirestorePermissionError({
+          path: `users/${auth.currentUser.uid}`,
+          operation: 'update',
+          requestResourceData: { photoURL: '...'},
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
     } finally {
       setIsUploading(false);
     }
@@ -347,4 +350,3 @@ export default function ProfileClient() {
     </>
   );
 }
-

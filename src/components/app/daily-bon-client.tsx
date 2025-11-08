@@ -10,6 +10,8 @@ import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
 import { collection, addDoc, doc, updateDoc, deleteDoc, runTransaction, query, where, getDocs } from 'firebase/firestore';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -189,15 +191,20 @@ export default function DailyBonClient() {
         stock_updated: false,
     };
     
-    try {
-      await addDoc(collection(firestore, 'daily_bon'), newBon);
-      toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan." });
-      setIsAddModalOpen(false);
-      addForm.reset();
-    } catch (error: any) {
-        console.error("Error adding document: ", error);
-        toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menambahkan data bon harian." });
-    }
+    addDoc(collection(firestore, 'daily_bon'), newBon)
+      .then(() => {
+        toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan." });
+        setIsAddModalOpen(false);
+        addForm.reset();
+      })
+      .catch(async (serverError) => {
+        const permissionError = new FirestorePermissionError({
+          path: 'daily_bon',
+          operation: 'create',
+          requestResourceData: newBon,
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
+      });
   }
 
   const handleEdit = (bon: DailyBon) => {
@@ -226,17 +233,23 @@ export default function DailyBonClient() {
 
   const confirmDelete = async () => {
     if (!selectedBon || !selectedBon.id || !firestore) return;
+    const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
 
-    try {
-      await deleteDoc(doc(firestore, 'daily_bon', selectedBon.id));
-      toast({ title: "Sukses", description: "Bon harian telah dihapus." });
-    } catch (error: any) {
-        console.error("Error deleting document: ", error);
-        toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal menghapus bon harian." });
-    } finally {
+    deleteDoc(bonRef)
+      .then(() => {
+        toast({ title: "Sukses", description: "Bon harian telah dihapus." });
+      })
+      .catch(async (serverError) => {
+        const permissionError = new FirestorePermissionError({
+          path: bonRef.path,
+          operation: 'delete',
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
+      })
+      .finally(() => {
         setIsDeleting(false);
         setSelectedBon(null);
-    }
+      });
   };
   
 async function onEditSubmit(values: z.infer<typeof editSchema>) {
@@ -261,51 +274,55 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
         const inventoryDoc = inventorySnapshot.docs[0];
         const inventoryRef = inventoryDoc.ref;
 
-        try {
-            await runTransaction(firestore, async (transaction) => {
-                const inventoryDoc = await transaction.get(inventoryRef);
-                if (!inventoryDoc.exists()) {
-                    throw new Error("Part tidak ditemukan di inventaris.");
-                }
+        runTransaction(firestore, async (transaction) => {
+            const inventoryDoc = await transaction.get(inventoryRef);
+            if (!inventoryDoc.exists()) {
+                throw new Error("Part tidak ditemukan di inventaris.");
+            }
 
-                const currentInventory = inventoryDoc.data() as InventoryItem;
-                const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_dailybon;
-                if (newQtyBaik < 0) {
-                    throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
-                }
-                const newAvailableQty = currentInventory.available_qty - selectedBon.qty_dailybon;
+            const currentInventory = inventoryDoc.data() as InventoryItem;
+            const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_dailybon;
+            if (newQtyBaik < 0) {
+                throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
+            }
+            const newAvailableQty = currentInventory.available_qty - selectedBon.qty_dailybon;
 
-                // Update inventory
-                transaction.update(inventoryRef, {
-                    qty_baik: newQtyBaik,
-                    available_qty: newAvailableQty,
-                });
-
-                // Update the bon with new status and flag
-                transaction.update(bonRef, {
-                    ...values,
-                    stock_updated: true,
-                });
+            // Update inventory
+            transaction.update(inventoryRef, {
+                qty_baik: newQtyBaik,
+                available_qty: newAvailableQty,
             });
 
+            // Update the bon with new status and flag
+            transaction.update(bonRef, {
+                ...values,
+                stock_updated: true,
+            });
+        }).then(() => {
             toast({ title: "Sukses", description: "Status bon diperbarui dan stok telah dikurangi." });
             setIsEditModalOpen(false);
             setSelectedBon(null);
-        } catch (error: any) {
-            console.error("Gagal memperbarui transaksi: ", error);
-            toast({ variant: "destructive", title: "Gagal", description: error.message || "Gagal memperbarui status bon." });
-        }
+        }).catch(async (serverError) => {
+            const permissionError = new FirestorePermissionError({
+                path: bonRef.path,
+                operation: 'update',
+                requestResourceData: values,
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        });
     } else {
-        // Just update the bon without touching the stock
-        try {
-            await updateDoc(bonRef, values);
+        updateDoc(bonRef, values).then(() => {
             toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
             setIsEditModalOpen(false);
             setSelectedBon(null);
-        } catch (error: any) {
-            console.error("Gagal memperbarui dokumen: ", error);
-            toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui status bon." });
-        }
+        }).catch(async (serverError) => {
+            const permissionError = new FirestorePermissionError({
+                path: bonRef.path,
+                operation: 'update',
+                requestResourceData: values,
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        });
     }
 }
 

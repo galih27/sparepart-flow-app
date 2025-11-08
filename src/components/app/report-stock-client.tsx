@@ -11,6 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
 import { collection, doc, updateDoc, writeBatch, deleteDoc, getDocs } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
 
 import PageHeader from '@/components/app/page-header';
 import { Input } from '@/components/ui/input';
@@ -136,23 +138,29 @@ export default function ReportStockClient() {
 
   const confirmDelete = async () => {
     if (!selectedItem || !selectedItem.id || !firestore) return;
+    const itemRef = doc(firestore, 'inventory', selectedItem.id);
 
-    try {
-      await deleteDoc(doc(firestore, 'inventory', selectedItem.id));
-      toast({ title: "Sukses", description: `Item ${selectedItem.part} telah dihapus.` });
-      await refetch();
-    } catch (error) {
-       console.error("Error deleting document: ", error);
-       toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus item." });
-    } finally {
-      setIsDeleting(false);
-      setSelectedItem(null);
-    }
+    deleteDoc(itemRef)
+      .then(async () => {
+        toast({ title: "Sukses", description: `Item ${selectedItem.part} telah dihapus.` });
+        await refetch();
+      })
+      .catch(async (serverError) => {
+        const permissionError = new FirestorePermissionError({
+          path: itemRef.path,
+          operation: 'delete',
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
+      })
+      .finally(() => {
+        setIsDeleting(false);
+        setSelectedItem(null);
+      });
   };
 
   const confirmDeleteAll = async () => {
     if (!firestore || !inventoryQuery) return;
-    setIsDeletingAll(false); // Close dialog immediately
+    setIsDeletingAll(false);
     toast({ title: "Menghapus Semua Data", description: "Proses ini mungkin memerlukan beberapa saat..." });
 
     try {
@@ -165,8 +173,11 @@ export default function ReportStockClient() {
         toast({ title: "Sukses", description: "Semua data report stock telah dihapus." });
         await refetch();
     } catch (error) {
-        console.error("Error deleting all documents: ", error);
-        toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus semua data report stock." });
+        const permissionError = new FirestorePermissionError({
+          path: 'inventory',
+          operation: 'delete',
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
     }
   };
 
@@ -224,8 +235,12 @@ export default function ReportStockClient() {
         await refetch();
 
       } catch (error: any) {
-        console.error("Error importing data: ", error);
-        toast({ variant: "destructive", title: "Gagal Impor", description: error.message || "Terjadi kesalahan saat mengimpor data." });
+        const permissionError = new FirestorePermissionError({
+          path: 'inventory',
+          operation: 'create',
+          requestResourceData: 'Multiple documents from Excel file',
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
       } finally {
         setIsImporting(false);
         if(fileInputRef.current) fileInputRef.current.value = "";
@@ -262,21 +277,27 @@ export default function ReportStockClient() {
     if (!selectedItem || !selectedItem.id || !firestore) return;
 
     const itemRef = doc(firestore, 'inventory', selectedItem.id);
+    const updatedData = {
+      ...values,
+      available_qty: values.qty_baik + values.qty_rusak,
+      qty_real: values.qty_baik + values.qty_rusak,
+    };
     
-    try {
-      await updateDoc(itemRef, {
-        ...values,
-        available_qty: values.qty_baik + values.qty_rusak,
-        qty_real: values.qty_baik + values.qty_rusak,
+    updateDoc(itemRef, updatedData)
+      .then(async () => {
+        toast({ title: "Sukses", description: "Data stok berhasil diperbarui." });
+        setIsModalOpen(false);
+        setIsEditing(false);
+        await refetch();
+      })
+      .catch(async (serverError) => {
+        const permissionError = new FirestorePermissionError({
+          path: itemRef.path,
+          operation: 'update',
+          requestResourceData: updatedData,
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
       });
-      toast({ title: "Sukses", description: "Data stok berhasil diperbarui." });
-      setIsModalOpen(false);
-      setIsEditing(false);
-      await refetch();
-    } catch (error) {
-      console.error("Error updating document: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui data stok." });
-    }
   }
 
   const formatCurrency = (value: number) => {
@@ -522,5 +543,3 @@ export default function ReportStockClient() {
     </>
   );
 }
-
-    

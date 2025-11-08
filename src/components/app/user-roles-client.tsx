@@ -9,8 +9,10 @@ import { Pencil, Plus, Trash2, UserCircle } from 'lucide-react';
 import type { User, Role, Permissions } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCollection, useFirestore } from '@/firebase';
-import { createUserWithEmailAndPassword, deleteUser } from 'firebase/auth';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { collection, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -249,39 +251,47 @@ export default function UserRolesClient() {
 
   const confirmDelete = async () => {
     if (!selectedUser || !selectedUser.id || !firestore) return;
-
-    try {
-      // NOTE: Deleting a user from Firebase Auth is a privileged operation
-      // and should ideally be done from a backend server with Admin SDK.
-      // For this app, we will just delete the Firestore record.
-      await deleteDoc(doc(firestore, 'users', selectedUser.id));
-      
-      toast({ title: "Sukses", description: `Pengguna ${selectedUser.nama_teknisi} telah dihapus.` });
-    } catch (error: any) {
-      console.error("Error deleting user: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: "Gagal menghapus pengguna." });
-    } finally {
-      setIsDeleting(false);
-      setSelectedUser(null);
-    }
+    const userRef = doc(firestore, 'users', selectedUser.id);
+    
+    deleteDoc(userRef)
+      .then(() => {
+        toast({ title: "Sukses", description: `Pengguna ${selectedUser.nama_teknisi} telah dihapus.` });
+      })
+      .catch(async (serverError) => {
+        const permissionError = new FirestorePermissionError({
+          path: userRef.path,
+          operation: 'delete',
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
+      })
+      .finally(() => {
+        setIsDeleting(false);
+        setSelectedUser(null);
+      });
   };
 
   async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!selectedUser || !selectedUser.id || !firestore) return;
 
     const userRef = doc(firestore, 'users', selectedUser.id);
+    const updatedData = { 
+      role: values.role,
+      permissions: values.permissions,
+    };
 
-    try {
-      await updateDoc(userRef, { 
-        role: values.role,
-        permissions: values.permissions,
+    updateDoc(userRef, updatedData)
+      .then(() => {
+        toast({ title: "Sukses", description: `Role & hak akses untuk ${selectedUser.nama_teknisi} berhasil diperbarui.` });
+        setIsEditModalOpen(false);
+      })
+      .catch(async (serverError) => {
+        const permissionError = new FirestorePermissionError({
+          path: userRef.path,
+          operation: 'update',
+          requestResourceData: updatedData,
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
       });
-      toast({ title: "Sukses", description: `Role & hak akses untuk ${selectedUser.nama_teknisi} berhasil diperbarui.` });
-      setIsEditModalOpen(false);
-    } catch (error) {
-      console.error("Error updating document: ", error);
-      toast({ variant: "destructive", title: "Gagal", description: "Gagal memperbarui data role." });
-    }
   }
 
   async function onAddSubmit(values: z.infer<typeof addSchema>) {
@@ -293,11 +303,9 @@ export default function UserRolesClient() {
     setIsSubmitting(true);
 
     try {
-      // 1. Create user in Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.password);
       const authUser = userCredential.user;
 
-      // 2. Save user data to Firestore, using the auth UID as the document ID
       const newUser: Omit<User, 'id' | 'password'> = {
         users: values.email.split('@')[0],
         nik: values.nik,
@@ -307,19 +315,25 @@ export default function UserRolesClient() {
         permissions: rolePermissions[values.role],
       };
 
-      await setDoc(doc(firestore, "users", authUser.uid), newUser);
+      const userDocRef = doc(firestore, "users", authUser.uid);
+      await setDoc(userDocRef, newUser);
       
       toast({ title: "Sukses", description: "Pengguna baru berhasil ditambahkan." });
       setIsAddModalOpen(false);
       addForm.reset();
 
-    } catch (error: any)
-{
-      console.error("Error adding user:", error);
-      const errorMessage = error.code === 'auth/email-already-in-use' 
-        ? "Email ini sudah terdaftar."
-        : "Gagal menambahkan pengguna baru. Periksa konsol untuk detailnya.";
-      toast({ variant: "destructive", title: "Gagal", description: errorMessage });
+    } catch (error: any) {
+        let path = 'users';
+        if (error.code === 'auth/email-already-in-use') {
+            toast({ variant: "destructive", title: "Gagal", description: "Email ini sudah terdaftar." });
+        } else {
+            const permissionError = new FirestorePermissionError({
+              path: 'users',
+              operation: 'create',
+              requestResourceData: values,
+            } satisfies SecurityRuleContext);
+            errorEmitter.emit('permission-error', permissionError);
+        }
     } finally {
         setIsSubmitting(false);
     }
@@ -567,5 +581,3 @@ export default function UserRolesClient() {
     </>
   );
 }
-
-    

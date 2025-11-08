@@ -7,6 +7,8 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { useEffect, useState, useCallback } from 'react';
+import { errorEmitter } from '../error-emitter';
+import { FirestorePermissionError, type SecurityRuleContext } from '../errors';
 
 export const useCollection = <T>(q: Query<DocumentData> | null) => {
   const [data, setData] = useState<T[] | null>(null);
@@ -26,8 +28,12 @@ export const useCollection = <T>(q: Query<DocumentData> | null) => {
             data.push({ id: doc.id, ...doc.data() } as T);
         });
         setData(data);
-    } catch (error) {
-        console.error("Error fetching collection:", error);
+    } catch (serverError: any) {
+        const permissionError = new FirestorePermissionError({
+          path: (q as any)._path?.toString(),
+          operation: 'list',
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
         setData([]);
     } finally {
         setIsLoading(false);
@@ -50,8 +56,12 @@ export const useCollection = <T>(q: Query<DocumentData> | null) => {
       });
       setData(data);
       setIsLoading(false);
-    }, (error) => {
-        console.error("Error with snapshot listener: ", error);
+    }, async (serverError) => {
+        const permissionError = new FirestorePermissionError({
+          path: (q as any)._path?.toString(),
+          operation: 'list',
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
         setIsLoading(false);
     });
 
@@ -65,5 +75,3 @@ export const useCollection = <T>(q: Query<DocumentData> | null) => {
 
   return { data, isLoading, refetch };
 };
-
-    

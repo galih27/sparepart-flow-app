@@ -7,6 +7,8 @@ import {
   getDoc,
 } from 'firebase/firestore';
 import { useEffect, useState, useCallback } from 'react';
+import { errorEmitter } from '../error-emitter';
+import { FirestorePermissionError, type SecurityRuleContext } from '../errors';
 
 export const useDoc = <T>(ref: DocumentReference<DocumentData> | null) => {
   const [data, setData] = useState<T | null>(null);
@@ -26,8 +28,12 @@ export const useDoc = <T>(ref: DocumentReference<DocumentData> | null) => {
       } else {
         setData(null);
       }
-    } catch (error) {
-      console.error("Error fetching document:", error);
+    } catch (serverError: any) {
+      const permissionError = new FirestorePermissionError({
+        path: ref.path,
+        operation: 'get',
+      } satisfies SecurityRuleContext);
+      errorEmitter.emit('permission-error', permissionError);
       setData(null);
     } finally {
       setIsLoading(false);
@@ -48,8 +54,12 @@ export const useDoc = <T>(ref: DocumentReference<DocumentData> | null) => {
         setData(null);
       }
       setIsLoading(false);
-    }, (error) => {
-      console.error("Error in snapshot listener:", error);
+    }, async (serverError) => {
+      const permissionError = new FirestorePermissionError({
+        path: ref.path,
+        operation: 'get',
+      } satisfies SecurityRuleContext);
+      errorEmitter.emit('permission-error', permissionError);
       setIsLoading(false);
     });
 
@@ -58,5 +68,3 @@ export const useDoc = <T>(ref: DocumentReference<DocumentData> | null) => {
 
   return { data, isLoading, refetch: fetchData };
 };
-
-    
