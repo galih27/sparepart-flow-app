@@ -142,6 +142,16 @@ export default function ProfileClient() {
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
+      if (!auth?.currentUser || !firestore || !firebaseApp) {
+        toast({
+          variant: "destructive",
+          title: "Gagal Memproses",
+          description: "Layanan belum siap. Silakan coba lagi sesaat lagi.",
+        });
+        return;
+      }
+      
+      setIsUploading(true);
       try {
         const compressedBlob = await compressImage(file);
         await handleUpload(compressedBlob);
@@ -152,6 +162,7 @@ export default function ProfileClient() {
           title: "Gagal Memproses",
           description: "Terjadi kesalahan saat memproses gambar.",
         });
+        setIsUploading(false);
       } finally {
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
@@ -161,23 +172,22 @@ export default function ProfileClient() {
   };
   
   const handleUpload = async (fileBlob: Blob) => {
-    if (!auth?.currentUser || !firebaseApp || !firestore) {
-      return;
-    }
+    // Auth and firestore are already checked in handleFileChange
+    const currentUserAuth = auth!.currentUser!;
+    const db = firestore!;
+    const app = firebaseApp!;
 
-    setIsUploading(true);
     try {
       // 1. Upload to Storage
-      const storage = getStorage(firebaseApp);
-      const storageRef = ref(storage, `avatars/${auth.currentUser.uid}/profile.jpg`);
+      const storage = getStorage(app);
+      const storageRef = ref(storage, `avatars/${currentUserAuth.uid}/profile.jpg`);
       const snapshot = await uploadBytes(storageRef, fileBlob);
       const downloadURL = await getDownloadURL(snapshot.ref);
 
       // 2. Update Auth & Firestore
-      // Create a direct doc reference here to ensure it's valid
-      const userDocumentRef = doc(firestore, "users", auth.currentUser.uid);
+      const userDocumentRef = doc(db, "users", currentUserAuth.uid);
       
-      await updateProfile(auth.currentUser, { photoURL: downloadURL });
+      await updateProfile(currentUserAuth, { photoURL: downloadURL });
       await updateDoc(userDocumentRef, { photoURL: downloadURL });
 
       // 3. Refetch data to update UI
@@ -349,4 +359,3 @@ export default function ProfileClient() {
     </>
   );
 }
-    
