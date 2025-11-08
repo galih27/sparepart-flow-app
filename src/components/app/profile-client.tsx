@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo, useRef } from "react";
@@ -28,6 +29,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -66,6 +68,9 @@ export default function ProfileClient() {
 
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
 
   const userDocRef = useMemo(() => {
     if (!firestore || !authUser) return null;
@@ -87,27 +92,33 @@ export default function ProfileClient() {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !authUser) return;
+    if (!file) return;
+
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+  };
+  
+  const handleUpload = async () => {
+    if (!selectedFile || !authUser) return;
 
     setIsUploading(true);
     toast({ title: "Mengunggah...", description: "Foto profil Anda sedang diunggah." });
 
     try {
       const storage = getStorage(firebaseApp);
-      const storageRef = ref(storage, `avatars/${authUser.uid}/${file.name}`);
+      const storageRef = ref(storage, `avatars/${authUser.uid}/${selectedFile.name}`);
       
-      const snapshot = await uploadBytes(storageRef, file);
+      const snapshot = await uploadBytes(storageRef, selectedFile);
       const downloadURL = await getDownloadURL(snapshot.ref);
 
       await updateProfile(authUser, { photoURL: downloadURL });
-
-      // In a real app, you'd probably want to refresh the user state
-      // or even store the URL in their Firestore document.
       
       toast({ title: "Sukses!", description: "Foto profil berhasil diperbarui." });
-      router.refresh(); // Refresh the page to show the new avatar in the header
+      setSelectedFile(null);
+      setPreviewUrl(null);
+      router.refresh();
 
     } catch (error) {
       console.error("Error uploading file:", error);
@@ -163,7 +174,7 @@ export default function ProfileClient() {
           <CardHeader>
             <CardTitle>Foto Profil</CardTitle>
             <CardDescription>
-              Ubah foto profil Anda. Klik pada gambar untuk mengunggah yang baru.
+              Klik pada gambar untuk memilih foto baru, lalu simpan perubahan.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
@@ -172,7 +183,7 @@ export default function ProfileClient() {
              ) : (
                 <div className="relative">
                     <Avatar className="h-32 w-32 cursor-pointer" onClick={handleAvatarClick}>
-                        <AvatarImage src={authUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
+                        <AvatarImage src={previewUrl || authUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
                         <AvatarFallback>
                             <UserCircle className="h-16 w-16" />
                         </AvatarFallback>
@@ -201,8 +212,17 @@ export default function ProfileClient() {
                     <p className="text-sm text-muted-foreground">{currentUser?.email}</p>
                 </div>
             )}
-             {isUploading && <p className="text-sm text-muted-foreground">Mengunggah...</p>}
           </CardContent>
+          {selectedFile && (
+              <CardFooter className="flex-col gap-2">
+                  <Button onClick={handleUpload} disabled={isUploading} className="w-full">
+                      {isUploading ? "Menyimpan..." : "Simpan Foto"}
+                  </Button>
+                  <Button variant="ghost" onClick={() => { setSelectedFile(null); setPreviewUrl(null); }} disabled={isUploading} className="w-full">
+                      Batal
+                  </Button>
+              </CardFooter>
+          )}
         </Card>
 
         <Card>
