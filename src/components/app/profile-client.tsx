@@ -139,7 +139,6 @@ export default function ProfileClient() {
 
     try {
       const storage = getStorage(firebaseApp);
-      // Simpan di folder 'image' sesuai permintaan
       const storageRef = ref(storage, `image/${authUser.uid}/profile.jpg`);
 
       // 1. Unggah string Data URI (sebagai teks) ke Firebase Storage.
@@ -148,6 +147,9 @@ export default function ProfileClient() {
       
       // 2. Dapatkan URL publik dari file yang baru diunggah.
       const downloadURL = await getDownloadURL(snapshot.ref);
+
+      // Tampilkan URL di konsol untuk verifikasi
+      console.log('Gambar disimpan di URL publik:', downloadURL);
 
       // 3. Perbarui hanya dokumen Firestore dengan URL baru.
       await updateDoc(userDocRef, { photoURL: downloadURL });
@@ -168,8 +170,6 @@ export default function ProfileClient() {
             description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
         });
     } finally {
-        // 5. PASTIKAN state isUploading selalu kembali ke false, apa pun yang terjadi.
-        // Ini akan mencegah tombol "Menyimpan..." macet.
         setIsUploading(false);
     }
   };
@@ -343,3 +343,5 @@ export default function ProfileClient() {
     </>
   );
 }
+
+    
