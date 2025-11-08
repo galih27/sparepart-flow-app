@@ -69,6 +69,7 @@ export default function ProfileClient() {
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [isCropping, setIsCropping] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -108,54 +109,65 @@ export default function ProfileClient() {
     }
   };
 
-  const onCropComplete = useCallback(async (croppedArea: Area, croppedAreaPixels: Area) => {
-    if (imageSrc) {
+  const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
+    setCroppedAreaPixels(croppedAreaPixels);
+  }, []);
+
+  const handleApplyCrop = useCallback(async () => {
+    if (imageSrc && croppedAreaPixels) {
       try {
         const croppedImageResult = await getCroppedImg(imageSrc, croppedAreaPixels);
         setCroppedImage(croppedImageResult);
+        setIsCropping(false);
+        setImageSrc(null);
       } catch (e) {
         console.error(e);
+        toast({
+          variant: "destructive",
+          title: "Gagal Memotong Gambar",
+          description: "Terjadi kesalahan saat memotong gambar.",
+        });
       }
     }
-  }, [imageSrc]);
+  }, [imageSrc, croppedAreaPixels, toast]);
+
 
   const handleSaveCroppedImage = async () => {
     if (!croppedImage || !auth?.currentUser || !firestore) {
       toast({
         variant: "destructive",
         title: "Gagal",
-        description: "Gambar yang dipotong tidak ditemukan atau layanan tidak siap.",
+        description: "Gambar atau layanan tidak siap untuk disimpan.",
       });
       return;
     }
-
+  
     setIsUploading(true);
-    const user = auth.currentUser;
-    const storage = getStorage(firebaseApp);
-    const storageRef = ref(storage, `avatars/${user.uid}/profile.jpg`);
-
+  
     try {
-      // Upload the cropped image data URL to Firebase Storage
+      const user = auth.currentUser;
+      const storage = getStorage(firebaseApp);
+      const storageRef = ref(storage, `avatars/${user.uid}/profile.jpg`);
+  
+      // Upload the cropped image data URL
       const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
       const downloadURL = await getDownloadURL(snapshot.ref);
-
-      // Update Firebase Auth and Firestore
+  
+      // Update Auth Profile and Firestore Document
+      await updateProfile(user, { photoURL: downloadURL });
       const userDoc = doc(firestore, 'users', user.uid);
-      await Promise.all([
-        updateProfile(user, { photoURL: downloadURL }),
-        updateDoc(userDoc, { photoURL: downloadURL })
-      ]);
+      await updateDoc(userDoc, { photoURL: downloadURL });
 
-      // Refetch user data to update UI and reset state
+      // Manually refetch user data to ensure UI updates
       await refetchUser();
       await refetchDoc();
+  
+      // Reset state and show success
       setCroppedImage(null);
-
       toast({
         title: "Sukses!",
         description: "Foto profil berhasil diperbarui.",
       });
-
     } catch (error) {
       console.error("Error saving cropped image:", error);
       toast({
@@ -164,9 +176,11 @@ export default function ProfileClient() {
         description: "Terjadi kesalahan saat menyimpan foto profil baru.",
       });
     } finally {
+      // This is crucial to stop the loading indicator
       setIsUploading(false);
     }
   };
+  
 
   async function onSubmitPassword(values: z.infer<typeof passwordSchema>) {
     if (!auth || !authUser || !authUser.email) return;
@@ -328,11 +342,9 @@ export default function ProfileClient() {
             </div>
             <DialogFooter>
                 <DialogClose asChild>
-                    <Button variant="outline" onClick={() => setImageSrc(null)}>Batal</Button>
+                    <Button variant="outline" onClick={() => {setIsCropping(false); setImageSrc(null);}}>Batal</Button>
                 </DialogClose>
-                <DialogClose asChild>
-                    <Button onClick={() => setIsCropping(false)}>Potong & Terapkan Pratinjau</Button>
-                </DialogClose>
+                <Button onClick={handleApplyCrop}>Potong & Terapkan Pratinjau</Button>
             </DialogFooter>
         </DialogContent>
       </Dialog>
