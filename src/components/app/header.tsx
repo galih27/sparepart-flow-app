@@ -10,7 +10,7 @@ import {
   LogOut,
   Search,
   UserCircle,
-  Warehouse,
+  Shield,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,7 @@ function HeaderContent() {
       <div className="flex items-center gap-2">
         <SidebarTrigger />
         <Link href="/" className="flex items-center gap-2 font-semibold text-lg md:text-xl font-headline">
-          <Warehouse className="h-6 w-6 text-primary" />
+          <Shield className="h-6 w-6 text-primary" />
           <span className="hidden sm:inline">Athena</span>
         </Link>
       </div>

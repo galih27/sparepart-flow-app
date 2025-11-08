@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from "react";
@@ -13,7 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Warehouse } from "lucide-react";
+import { Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/firebase";
 import { signInWithEmailAndPassword } from "firebase/auth";
@@ -67,7 +68,7 @@ export default function LoginPage() {
           <Card>
             <CardHeader className="space-y-1 text-center">
               <div className="flex justify-center items-center gap-2">
-                <Warehouse className="h-8 w-8 text-primary" />
+                <Shield className="h-8 w-8 text-primary" />
                 <CardTitle className="text-3xl font-bold tracking-tight font-headline">
                   Athena
                 </CardTitle>
