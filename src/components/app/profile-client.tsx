@@ -303,16 +303,18 @@ export default function ProfileClient() {
               Sesuaikan foto profil Anda. Gunakan slider untuk zoom.
             </DialogDescription>
           </DialogHeader>
-          {imageToCrop && (
-              <ImageCropper 
-                  image={imageToCrop}
-                  onCropComplete={(croppedImg) => {
-                      setCroppedImage(croppedImg);
-                      setImageToCrop(null);
-                  }}
-                  onCancel={() => setImageToCrop(null)}
-              />
-          )}
+          <div className="flex-grow relative">
+            {imageToCrop && (
+                <ImageCropper 
+                    image={imageToCrop}
+                    onCropComplete={(croppedImg) => {
+                        setCroppedImage(croppedImg);
+                        setImageToCrop(null);
+                    }}
+                    onCancel={() => setImageToCrop(null)}
+                />
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </>
