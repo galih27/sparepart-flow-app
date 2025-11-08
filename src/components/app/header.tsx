@@ -56,7 +56,7 @@ function HeaderContent() {
         <SidebarTrigger />
         <Link href="/" className="flex items-center gap-2 font-semibold text-lg md:text-xl font-headline">
           <Warehouse className="h-6 w-6 text-primary" />
-          <span className="hidden sm:inline">Sparepart Flow</span>
+          <span className="hidden sm:inline">Athena</span>
         </Link>
       </div>
 

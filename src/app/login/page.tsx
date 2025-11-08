@@ -69,7 +69,7 @@ export default function LoginPage() {
               <div className="flex justify-center items-center gap-2">
                 <Warehouse className="h-8 w-8 text-primary" />
                 <CardTitle className="text-3xl font-bold tracking-tight font-headline">
-                  Sparepart Flow
+                  Athena
                 </CardTitle>
               </div>
               <CardDescription>
