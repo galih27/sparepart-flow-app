@@ -50,6 +50,11 @@ function HeaderContent() {
 
   const isLoading = isLoadingUser || isLoadingRole;
   
+  const getInitials = (name: string) => {
+    if (!name) return '';
+    return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  }
+
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6">
       <div className="flex items-center gap-2">
@@ -74,7 +79,13 @@ function HeaderContent() {
             <Avatar className="h-9 w-9">
               <AvatarImage src={currentUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
               <AvatarFallback>
-                {isLoading ? <Skeleton className="h-9 w-9 rounded-full" /> : <UserCircle />}
+                {isLoading ? (
+                  <Skeleton className="h-9 w-9 rounded-full" />
+                ) : currentUser?.nama_teknisi ? (
+                  getInitials(currentUser.nama_teknisi)
+                ) : (
+                  <UserCircle />
+                )}
               </AvatarFallback>
             </Avatar>
           </Button>
