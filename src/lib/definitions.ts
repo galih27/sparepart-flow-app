@@ -58,6 +58,7 @@ export type User = {
   password?: string;
   role: Role;
   permissions: Permissions;
+  photoURL?: string;
 };
 
 export type DailyBon = {
@@ -116,3 +117,5 @@ export type Sob = {
   id?: string;
   name: string;
 };
+
+    

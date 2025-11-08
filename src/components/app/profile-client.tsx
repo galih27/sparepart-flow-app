@@ -18,7 +18,7 @@ import {
   uploadBytes,
   getDownloadURL,
 } from "firebase/storage";
-import { doc } from "firebase/firestore";
+import { doc, updateDoc } from "firebase/firestore";
 import { useUser, useAuth, useDoc, useFirestore, useFirebaseApp } from "@/firebase";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@/lib/definitions";
@@ -114,7 +114,7 @@ export default function ProfileClient() {
   };
   
   const handleUpload = async () => {
-    if (!croppedImage || !authUser || !firebaseApp) return;
+    if (!croppedImage || !authUser || !firebaseApp || !userDocRef) return;
 
     setIsUploading(true);
     toast({ title: "Mengunggah...", description: "Foto profil Anda sedang diunggah." });
@@ -123,11 +123,12 @@ export default function ProfileClient() {
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `avatars/${authUser.uid}/profile.jpg`);
       
-      // Use the blob directly from the croppedImage state
       const snapshot = await uploadBytes(storageRef, croppedImage.blob, { contentType: 'image/jpeg' });
       const downloadURL = await getDownloadURL(snapshot.ref);
 
+      // Update both Auth and Firestore
       await updateProfile(authUser, { photoURL: downloadURL });
+      await updateDoc(userDocRef, { photoURL: downloadURL });
       
       toast({ title: "Sukses!", description: "Foto profil berhasil diperbarui." });
       setCroppedImage(null); // Clear cropped image after upload
