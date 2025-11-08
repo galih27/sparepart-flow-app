@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -55,6 +55,59 @@ const passwordSchema = z
     path: ["confirmPassword"],
   });
 
+// Fungsi untuk kompresi gambar
+const compressImage = (file: File): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const MAX_WIDTH = 512;
+    const MAX_HEIGHT = 512;
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height = Math.round((height *= MAX_WIDTH / width));
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width = Math.round((width *= MAX_HEIGHT / height));
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          return reject(new Error('Tidak dapat membuat canvas context'));
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Gagal membuat blob gambar'));
+            }
+          },
+          'image/jpeg',
+          0.8 // Kualitas kompresi 80%
+        );
+      };
+      img.onerror = (error) => reject(error);
+    };
+    reader.onerror = (error) => reject(error);
+  });
+};
+
+
 export default function ProfileClient() {
   const { toast } = useToast();
   const firebaseApp = useFirebaseApp();
@@ -86,23 +139,41 @@ export default function ProfileClient() {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      handleUpload(file);
+      setIsUploading(true);
+      try {
+        const compressedBlob = await compressImage(file);
+        await handleUpload(compressedBlob);
+      } catch (error) {
+        console.error("Error compressing or uploading file:", error);
+        toast({
+          variant: "destructive",
+          title: "Gagal Mengunggah",
+          description: "Terjadi kesalahan saat memproses gambar.",
+        });
+        setIsUploading(false); // Pastikan berhenti loading jika kompresi gagal
+      } finally {
+        // Reset file input
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
     }
   };
   
-  const handleUpload = async (file: File) => {
-    if (!authUser || !firebaseApp || !userDocRef) return;
-
-    setIsUploading(true);
+  const handleUpload = async (fileBlob: Blob) => {
+    if (!authUser || !firebaseApp || !userDocRef) {
+      setIsUploading(false);
+      return;
+    }
 
     try {
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `avatars/${authUser.uid}/profile.jpg`);
       
-      const snapshot = await uploadBytes(storageRef, file);
+      const snapshot = await uploadBytes(storageRef, fileBlob);
       const downloadURL = await getDownloadURL(snapshot.ref);
 
       // Update both Auth and Firestore in parallel
@@ -126,7 +197,6 @@ export default function ProfileClient() {
     } finally {
       // This is crucial: always set isUploading to false
       setIsUploading(false);
-      if(fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -172,7 +242,7 @@ export default function ProfileClient() {
           <CardHeader>
             <CardTitle>Foto Profil</CardTitle>
             <CardDescription>
-              Klik pada gambar untuk memilih foto baru.
+              Klik pada gambar untuk memilih foto baru. Gambar akan dikompres.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
