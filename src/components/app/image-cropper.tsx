@@ -65,7 +65,7 @@ export default function ImageCropper({ image, onCropComplete, onCancel }: ImageC
                 showGrid={false}
             />
         </div>
-      <div className="p-4 space-y-4">
+      <div className="p-6 space-y-4 bg-background rounded-b-lg">
         <div className="flex items-center space-x-4">
             <span>Zoom</span>
             <Slider

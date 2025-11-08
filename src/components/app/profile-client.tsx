@@ -296,25 +296,23 @@ export default function ProfileClient() {
       </div>
 
       <Dialog open={!!imageToCrop} onOpenChange={(open) => !open && setImageToCrop(null)}>
-        <DialogContent className="max-h-[90vh] flex flex-col sm:max-w-xl">
-          <DialogHeader>
+        <DialogContent className="max-h-[90vh] flex flex-col sm:max-w-xl p-0">
+          <DialogHeader className="p-6 pb-0">
             <DialogTitle>Potong Gambar</DialogTitle>
             <DialogDescription>
               Sesuaikan foto profil Anda. Gunakan slider untuk zoom.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex-grow relative mt-4">
-            {imageToCrop && (
-                <ImageCropper 
-                    image={imageToCrop}
-                    onCropComplete={(croppedImg) => {
-                        setCroppedImage(croppedImg);
-                        setImageToCrop(null);
-                    }}
-                    onCancel={() => setImageToCrop(null)}
-                />
-            )}
-          </div>
+          {imageToCrop && (
+              <ImageCropper 
+                  image={imageToCrop}
+                  onCropComplete={(croppedImg) => {
+                      setCroppedImage(croppedImg);
+                      setImageToCrop(null);
+                  }}
+                  onCancel={() => setImageToCrop(null)}
+              />
+          )}
         </DialogContent>
       </Dialog>
     </>
