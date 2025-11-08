@@ -313,6 +313,7 @@ export default function UserRolesClient() {
         email: values.email,
         role: values.role,
         permissions: rolePermissions[values.role],
+        photoURL: `https://picsum.photos/seed/${authUser.uid}/200/200`,
       };
 
       const userDocRef = doc(firestore, "users", authUser.uid);
