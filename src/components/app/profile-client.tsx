@@ -135,52 +135,54 @@ export default function ProfileClient() {
   }, [imageSrc, croppedAreaPixels, toast]);
 
 
-  const handleSaveCroppedImage = async () => {
-    if (!croppedImage || !authUser || !firestore || !firebaseApp) return;
+ const handleSaveCroppedImage = async () => {
+    if (!croppedImage || !authUser || !firestore || !firebaseApp) {
+        toast({
+            variant: "destructive",
+            title: "Gagal Menyimpan",
+            description: "Layanan otentikasi tidak siap. Coba lagi.",
+        });
+        return;
+    }
 
     setIsUploading(true);
     try {
-      const user = authUser;
-      const storage = getStorage(firebaseApp);
-      const storageRef = ref(storage, `image/${user.uid}/profile.jpg`);
+        const user = authUser;
+        const storage = getStorage(firebaseApp);
+        const storageRef = ref(storage, `image/${user.uid}/profile.jpg`);
 
-      // The `croppedImage` is a Base64 encoded Data URI (text).
-      // `uploadString` with 'data_url' format handles the conversion to a binary file (Blob) for storage.
-      const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
-      const downloadURL = await getDownloadURL(snapshot.ref);
+        // Di browser, gambar yang dipotong adalah string Data URI (teks).
+        // `uploadString` dengan format 'data_url' secara otomatis mengubahnya menjadi file biner (Blob) untuk disimpan.
+        const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
+        const downloadURL = await getDownloadURL(snapshot.ref);
 
-      // Update both Auth and Firestore
-      await updateProfile(user, { photoURL: downloadURL });
-      const userDoc = doc(firestore, 'users', user.uid);
-      await updateDoc(userDoc, { photoURL: downloadURL });
+        // Perbarui URL di Firebase Authentication
+        await updateProfile(user, { photoURL: downloadURL });
+        
+        // Perbarui URL di dokumen Firestore
+        const userDoc = doc(firestore, 'users', user.uid);
+        await updateDoc(userDoc, { photoURL: downloadURL });
       
-      // Refetch user data to update UI
-      await refetchUser();
+        toast({
+            title: "Sukses!",
+            description: "Foto profil berhasil diperbarui.",
+        });
 
-      setCroppedImage(null); // Clear preview
-      toast({
-        title: "Sukses!",
-        description: "Foto profil berhasil diperbarui.",
-      });
+        // Hapus pratinjau. Listener onAuthStateChanged akan memperbarui UI secara otomatis.
+        setCroppedImage(null);
 
     } catch (error) {
         console.error("Error saving profile image:", error);
         toast({
-          variant: "destructive",
-          title: "Gagal Menyimpan",
-          description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
+            variant: "destructive",
+            title: "Gagal Menyimpan",
+            description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
         });
-        const permissionError = new FirestorePermissionError({
-          path: `users/${authUser.uid}`,
-          operation: 'update',
-          requestResourceData: { photoURL: '...'},
-        } satisfies SecurityRuleContext);
-        errorEmitter.emit('permission-error', permissionError);
     } finally {
-      setIsUploading(false);
+        // Jaminan bahwa status 'isUploading' akan selalu kembali ke false.
+        setIsUploading(false);
     }
-  };
-  
+};
 
   async function onSubmitPassword(values: z.infer<typeof passwordSchema>) {
     if (!auth || !authUser || !authUser.email) return;
