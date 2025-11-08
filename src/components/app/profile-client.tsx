@@ -22,9 +22,6 @@ import { useUser, useAuth, useDoc, useFirestore, useFirebaseApp } from "@/fireba
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@/lib/definitions";
 import type { Area } from 'react-easy-crop';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
-
 
 import PageHeader from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
@@ -149,26 +146,29 @@ export default function ProfileClient() {
     try {
         const user = authUser;
         const storage = getStorage(firebaseApp);
+        // Menyimpan di folder `image` sesuai permintaan
         const storageRef = ref(storage, `image/${user.uid}/profile.jpg`);
 
-        // Di browser, gambar yang dipotong adalah string Data URI (teks).
-        // `uploadString` dengan format 'data_url' secara otomatis mengubahnya menjadi file biner (Blob) untuk disimpan.
+        // `uploadString` dengan 'data_url' akan menangani konversi dari base64 ke blob.
         const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
         const downloadURL = await getDownloadURL(snapshot.ref);
 
-        // Perbarui URL di Firebase Authentication
+        // 1. Perbarui URL di Firebase Authentication
         await updateProfile(user, { photoURL: downloadURL });
         
-        // Perbarui URL di dokumen Firestore
+        // 2. Perbarui URL di dokumen Firestore
         const userDoc = doc(firestore, 'users', user.uid);
         await updateDoc(userDoc, { photoURL: downloadURL });
+
+        // 3. Panggil refetch yang sudah diperbaiki untuk memperbarui UI
+        await refetchUser();
+        await refetchDoc();
       
         toast({
             title: "Sukses!",
             description: "Foto profil berhasil diperbarui.",
         });
 
-        // Hapus pratinjau. Listener onAuthStateChanged akan memperbarui UI secara otomatis.
         setCroppedImage(null);
 
     } catch (error) {
@@ -353,5 +353,3 @@ export default function ProfileClient() {
     </>
   );
 }
-
-    

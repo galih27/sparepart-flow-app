@@ -19,7 +19,7 @@ export const useUser = () => {
     
     setIsLoading(true);
     try {
-      // Force a token refresh and get the latest user data from Firebase Auth
+      // Force a token refresh to get the latest user data from Firebase Auth
       await auth.currentUser.reload();
       // After reloading, get the fresh user object which includes the latest profile
       const freshUser = auth.currentUser;
@@ -52,5 +52,3 @@ export const useUser = () => {
 
   return { user, isLoading, refetch };
 };
-
-    
