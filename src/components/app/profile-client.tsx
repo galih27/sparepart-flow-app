@@ -180,11 +180,8 @@ export default function ProfileClient() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
-             {isLoading || isUploading ? (
-                <div className="relative">
-                    <Skeleton className="h-32 w-32 rounded-full" />
-                    {isUploading && <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full text-white text-sm">Uploading...</div>}
-                </div>
+             {isLoading ? (
+                <Skeleton className="h-32 w-32 rounded-full" />
              ) : (
                 <div className="relative">
                     <Avatar className="h-32 w-32 cursor-pointer" onClick={handleAvatarClick}>
@@ -193,9 +190,13 @@ export default function ProfileClient() {
                             <UserCircle className="h-16 w-16" />
                         </AvatarFallback>
                     </Avatar>
-                    <div className="absolute bottom-1 right-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground cursor-pointer" onClick={handleAvatarClick}>
-                       <Camera className="h-4 w-4" />
-                    </div>
+                    {isUploading ? (
+                       <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full text-white text-sm">Uploading...</div>
+                    ) : (
+                       <div className="absolute bottom-1 right-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground cursor-pointer" onClick={handleAvatarClick}>
+                          <Camera className="h-4 w-4" />
+                       </div>
+                    )}
                 </div>
              )}
              <input 
@@ -280,5 +281,3 @@ export default function ProfileClient() {
     </>
   );
 }
-
-    
