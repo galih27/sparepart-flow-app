@@ -41,7 +41,7 @@ export default function ImageCropper({ image, onCropComplete, onCancel }: ImageC
 
     try {
       const croppedImage = await getCroppedImg(image, croppedAreaPixels);
-      if(croppedImage) {
+      if (croppedImage) {
         onCropComplete(croppedImage);
       }
     } catch (e) {
@@ -52,39 +52,38 @@ export default function ImageCropper({ image, onCropComplete, onCancel }: ImageC
 
   return (
     <div className="flex flex-col h-full">
-        <div className="relative flex-grow">
-            <Cropper
-                image={image}
-                crop={crop}
-                zoom={zoom}
-                aspect={1}
-                onCropChange={onCropChange}
-                onZoomChange={onZoomChange}
-                onCropComplete={onCropCompleteInternal}
-                cropShape="round"
-                showGrid={false}
-            />
-        </div>
+      <div className="relative flex-grow">
+        <Cropper
+          image={image}
+          crop={crop}
+          zoom={zoom}
+          aspect={1}
+          onCropChange={onCropChange}
+          onZoomChange={onZoomChange}
+          onCropComplete={onCropCompleteInternal}
+          cropShape="round"
+          showGrid={false}
+        />
+      </div>
       <div className="p-6 space-y-4 bg-background rounded-b-lg">
         <div className="flex items-center space-x-4">
-            <span>Zoom</span>
-            <Slider
-                value={[zoom]}
-                min={1}
-                max={3}
-                step={0.1}
-                onValueChange={onZoomChange}
-            />
+          <span>Zoom</span>
+          <Slider
+            value={[zoom]}
+            min={1}
+            max={3}
+            step={0.1}
+            onValueChange={onZoomChange}
+          />
         </div>
         <DialogFooter>
-            <Button variant="outline" onClick={onCancel}>Batal</Button>
-            <Button onClick={handleCropImage}>Potong & Simpan</Button>
+          <Button variant="outline" onClick={onCancel}>Batal</Button>
+          <Button onClick={handleCropImage}>Potong & Simpan</Button>
         </DialogFooter>
       </div>
     </div>
   );
 }
-
 
 function createImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -108,38 +107,31 @@ async function getCroppedImg(
     return null;
   }
 
-  const safeArea = Math.max(image.width, image.height) * 2;
-
-  canvas.width = safeArea;
-  canvas.height = safeArea;
-
-  ctx.translate(safeArea / 2, safeArea / 2);
-  
-  ctx.drawImage(
-    image,
-    safeArea / 2 - image.width * 0.5,
-    safeArea / 2 - image.height * 0.5
-  );
-  
-  const data = ctx.getImageData(0, 0, safeArea, safeArea);
-
+  // set canvas size to match the cropped area
   canvas.width = pixelCrop.width;
   canvas.height = pixelCrop.height;
 
-  ctx.putImageData(
-    data,
-    Math.round(0 - safeArea / 2 + image.width * 0.5 - pixelCrop.x),
-    Math.round(0 - safeArea / 2 + image.height * 0.5 - pixelCrop.y)
+  // draw the cropped image
+  ctx.drawImage(
+    image,
+    pixelCrop.x,
+    pixelCrop.y,
+    pixelCrop.width,
+    pixelCrop.height,
+    0,
+    0,
+    pixelCrop.width,
+    pixelCrop.height
   );
 
   return new Promise((resolve, reject) => {
-    canvas.toBlob((file) => {
-      if (file) {
-        resolve({ url: URL.createObjectURL(file), blob: file as Blob });
-      } else {
+    canvas.toBlob((blob) => {
+      if (!blob) {
         reject(new Error('Canvas is empty'));
+        return;
       }
+      const url = URL.createObjectURL(blob);
+      resolve({ url, blob });
     }, 'image/jpeg');
   });
 }
-
