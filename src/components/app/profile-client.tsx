@@ -97,7 +97,6 @@ export default function ProfileClient() {
     if (!authUser || !firebaseApp || !userDocRef) return;
 
     setIsUploading(true);
-    toast({ title: "Mengunggah...", description: "Foto profil Anda sedang diunggah." });
 
     try {
       const storage = getStorage(firebaseApp);
