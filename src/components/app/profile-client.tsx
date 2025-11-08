@@ -133,23 +133,31 @@ export default function ProfileClient() {
 
 
   const handleSaveCroppedImage = async () => {
-    if (!croppedImage || !authUser || !userDocRef || !firebaseApp) return;
+    if (!croppedImage || !authUser || !userDocRef || !firebaseApp) {
+      toast({
+        variant: "destructive",
+        title: "Gagal",
+        description: "Informasi pengguna atau gambar tidak ditemukan.",
+      });
+      return;
+    }
 
     setIsUploading(true);
 
     try {
+      // 1. Dapatkan referensi penyimpanan
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `images/${authUser.uid}/profile.jpg`);
 
-      // 1. Unggah string Data URI (sebagai teks) ke Firebase Storage.
+      // 2. Unggah gambar yang sudah dipotong (sebagai data URL)
       const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
       
-      // 2. Dapatkan URL publik dari file yang baru diunggah.
+      // 3. Dapatkan URL publik dari file yang baru diunggah.
       const downloadURL = await getDownloadURL(snapshot.ref);
       
       console.log('Gambar disimpan di URL publik:', downloadURL);
 
-      // 3. Perbarui hanya dokumen Firestore dengan URL baru.
+      // 4. Perbarui dokumen Firestore dengan URL baru.
       await updateDoc(userDocRef, { photoURL: downloadURL });
       
       toast({
@@ -157,7 +165,7 @@ export default function ProfileClient() {
           description: "Foto profil berhasil diperbarui.",
       });
 
-      // 4. Bersihkan pratinjau gambar yang dipotong
+      // 5. Bersihkan pratinjau gambar yang dipotong
       setCroppedImage(null);
 
     } catch (error) {
@@ -168,6 +176,7 @@ export default function ProfileClient() {
             description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
         });
     } finally {
+        // 6. Pastikan tombol kembali normal, apa pun yang terjadi.
         setIsUploading(false);
     }
   };
@@ -345,5 +354,6 @@ export default function ProfileClient() {
     </>
   );
 }
+    
 
     
