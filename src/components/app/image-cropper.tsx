@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useCallback } from 'react';
@@ -142,7 +141,7 @@ async function getCroppedImg(
   return new Promise((resolve, reject) => {
     canvas.toBlob((file) => {
       if (file) {
-        resolve({ url: URL.createObjectURL(file), blob: file });
+        resolve({ url: URL.createObjectURL(file), blob: file as Blob });
       } else {
         reject(new Error('Canvas is empty'));
       }
