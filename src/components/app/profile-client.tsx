@@ -70,6 +70,7 @@ export default function ProfileClient() {
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isCropping, setIsCropping] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const userDocRef = useMemo(() => {
@@ -131,31 +132,33 @@ export default function ProfileClient() {
   }, [imageSrc, croppedAreaPixels, toast]);
 
 
- const handleSaveCroppedImage = async () => {
+  const handleSaveCroppedImage = async () => {
     if (!croppedImage || !authUser || !userDocRef || !firebaseApp) return;
 
     setIsUploading(true);
-    
+
     try {
-        const storage = getStorage(firebaseApp);
-        const storageRef = ref(storage, `image/${authUser.uid}/profile.jpg`);
+      const storage = getStorage(firebaseApp);
+      // Simpan di folder 'image' sesuai permintaan
+      const storageRef = ref(storage, `image/${authUser.uid}/profile.jpg`);
 
-        // 1. Upload the cropped image string
-        const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
-        
-        // 2. Get the public download URL
-        const downloadURL = await getDownloadURL(snapshot.ref);
-
-        // 3. Update only the Firestore document with the new URL
-        await updateDoc(userDocRef, { photoURL: downloadURL });
+      // 1. Unggah string Data URI (sebagai teks) ke Firebase Storage.
+      // Firebase Storage akan secara otomatis mengubahnya menjadi file gambar (blob).
+      const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
       
-        toast({
-            title: "Sukses!",
-            description: "Foto profil berhasil diperbarui. Tampilan akan segera berubah.",
-        });
+      // 2. Dapatkan URL publik dari file yang baru diunggah.
+      const downloadURL = await getDownloadURL(snapshot.ref);
 
-        // Clear the preview image
-        setCroppedImage(null);
+      // 3. Perbarui hanya dokumen Firestore dengan URL baru.
+      await updateDoc(userDocRef, { photoURL: downloadURL });
+      
+      toast({
+          title: "Sukses!",
+          description: "Foto profil berhasil diperbarui.",
+      });
+
+      // 4. Bersihkan pratinjau gambar yang dipotong
+      setCroppedImage(null);
 
     } catch (error) {
         console.error("Error saving profile image:", error);
@@ -165,10 +168,11 @@ export default function ProfileClient() {
             description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
         });
     } finally {
-        // 4. ALWAYS ensure the uploading state is reset
+        // 5. PASTIKAN state isUploading selalu kembali ke false, apa pun yang terjadi.
+        // Ini akan mencegah tombol "Menyimpan..." macet.
         setIsUploading(false);
     }
-};
+  };
 
   async function onSubmitPassword(values: z.infer<typeof passwordSchema>) {
     if (!auth || !authUser || !authUser.email) return;
@@ -339,5 +343,3 @@ export default function ProfileClient() {
     </>
   );
 }
-
-    
