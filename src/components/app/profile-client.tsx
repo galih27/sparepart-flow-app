@@ -136,44 +136,34 @@ export default function ProfileClient() {
 
 
   const handleSaveCroppedImage = async () => {
-    if (!croppedImage || !authUser || !firestore) {
-      toast({
-        variant: "destructive",
-        title: "Gagal",
-        description: "Gambar atau layanan tidak siap untuk disimpan.",
-      });
-      return;
-    }
-  
+    if (!croppedImage || !authUser || !firestore || !firebaseApp) return;
+
     setIsUploading(true);
-  
     try {
       const user = authUser;
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `avatars/${user.uid}/profile.jpg`);
-  
-      // 1. Upload the cropped image data URL
+
+      // The `croppedImage` is a Base64 encoded Data URI (text).
+      // `uploadString` with 'data_url' format handles the conversion to a binary file (Blob) for storage.
       const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
-      // 2. Get the public download URL
       const downloadURL = await getDownloadURL(snapshot.ref);
-  
-      // 3. Update Firebase Auth profile
+
+      // Update both Auth and Firestore
       await updateProfile(user, { photoURL: downloadURL });
-      
-      // 4. Update the user document in Firestore
       const userDoc = doc(firestore, 'users', user.uid);
       await updateDoc(userDoc, { photoURL: downloadURL });
 
-      // 5. Refetch user data to update the UI
+      // Refetch user data to update UI
       await refetchUser();
-      await refetchDoc();
-  
-      setCroppedImage(null); // Clear preview image and hide save button
+
+      setCroppedImage(null); // Clear preview
       toast({
         title: "Sukses!",
         description: "Foto profil berhasil diperbarui.",
       });
-    } catch (error: any) {
+
+    } catch (error) {
         console.error("Error saving profile image:", error);
         toast({
           variant: "destructive",
@@ -187,7 +177,7 @@ export default function ProfileClient() {
         } satisfies SecurityRuleContext);
         errorEmitter.emit('permission-error', permissionError);
     } finally {
-      setIsUploading(false); // Ensure this is always called
+      setIsUploading(false);
     }
   };
   
