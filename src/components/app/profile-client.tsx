@@ -125,7 +125,9 @@ export default function ProfileClient() {
       const downloadURL = await getDownloadURL(snapshot.ref);
 
       // Update both Auth and Firestore
-      await updateProfile(authUser, { photoURL: downloadURL });
+      if(auth.currentUser) {
+        await updateProfile(auth.currentUser, { photoURL: downloadURL });
+      }
       await updateDoc(userDocRef, { photoURL: downloadURL });
       
       toast({ title: "Sukses!", description: "Foto profil berhasil diperbarui." });
@@ -302,7 +304,7 @@ export default function ProfileClient() {
             </DialogDescription>
           </DialogHeader>
           {imageToCrop && (
-            <div className="relative flex-grow">
+            <div className="flex-grow relative">
               <ImageCropper
                 image={imageToCrop}
                 onCropComplete={(croppedImg) => {
@@ -318,3 +320,5 @@ export default function ProfileClient() {
     </>
   );
 }
+
+    

@@ -135,3 +135,5 @@ async function getCroppedImg(
     }, 'image/jpeg');
   });
 }
+
+    
