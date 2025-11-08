@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -14,13 +14,14 @@ import {
 import {
   getStorage,
   ref,
-  uploadBytes,
+  uploadString,
   getDownloadURL,
 } from "firebase/storage";
 import { doc, updateDoc } from "firebase/firestore";
 import { useUser, useAuth, useDoc, useFirestore, useFirebaseApp } from "@/firebase";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@/lib/definitions";
+import type { Area } from 'react-easy-crop';
 
 import PageHeader from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  CardFooter
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -43,6 +45,9 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "../ui/dialog";
+import ImageCropper from "./image-cropper";
+import { getCroppedImg } from "@/lib/canvas-utils";
 
 const passwordSchema = z
   .object({
@@ -55,59 +60,6 @@ const passwordSchema = z
     path: ["confirmPassword"],
   });
 
-// Fungsi untuk kompresi gambar
-const compressImage = (file: File): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
-    const MAX_WIDTH = 512;
-    const MAX_HEIGHT = 512;
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height = Math.round((height *= MAX_WIDTH / width));
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width = Math.round((width *= MAX_HEIGHT / height));
-            height = MAX_HEIGHT;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          return reject(new Error('Tidak dapat membuat canvas context'));
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error('Gagal membuat blob gambar'));
-            }
-          },
-          'image/jpeg',
-          0.8 // Kualitas kompresi 80%
-        );
-      };
-      img.onerror = (error) => reject(error);
-    };
-    reader.onerror = (error) => reject(error);
-  });
-};
-
-
 export default function ProfileClient() {
   const { toast } = useToast();
   const firebaseApp = useFirebaseApp();
@@ -115,6 +67,9 @@ export default function ProfileClient() {
   const firestore = useFirestore();
   const { user: authUser, isLoading: isAuthLoading, refetch: refetchUser } = useUser();
 
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [croppedImage, setCroppedImage] = useState<string | null>(null);
+  const [isCropping, setIsCropping] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -135,85 +90,85 @@ export default function ProfileClient() {
   });
 
   const handleAvatarClick = () => {
-    if (isUploading) return;
     fileInputRef.current?.click();
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (!auth?.currentUser || !firestore || !firebaseApp) {
-        toast({
-          variant: "destructive",
-          title: "Gagal Memproses",
-          description: "Layanan belum siap. Silakan coba lagi sesaat lagi.",
-        });
-        return;
-      }
-      
-      setIsUploading(true);
-      try {
-        const compressedBlob = await compressImage(file);
-        await handleUpload(compressedBlob);
-      } catch (error) {
-        console.error("Error compressing or uploading file:", error);
-        toast({
-          variant: "destructive",
-          title: "Gagal Memproses",
-          description: "Terjadi kesalahan saat memproses gambar.",
-        });
-        setIsUploading(false);
-      } finally {
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
+    if (event.target.files && event.target.files.length > 0) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        setImageSrc(reader.result as string);
+        setIsCropping(true);
+      });
+      reader.readAsDataURL(file);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
       }
     }
   };
-  
-  const handleUpload = async (fileBlob: Blob) => {
-    // Auth and firestore are already checked in handleFileChange
-    const currentUserAuth = auth!.currentUser!;
-    const db = firestore!;
-    const app = firebaseApp!;
+
+  const onCropComplete = useCallback(async (croppedArea: Area, croppedAreaPixels: Area) => {
+    if (imageSrc) {
+      try {
+        const croppedImageResult = await getCroppedImg(imageSrc, croppedAreaPixels);
+        setCroppedImage(croppedImageResult);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [imageSrc]);
+
+  const handleSaveCroppedImage = async () => {
+    if (!croppedImage || !auth?.currentUser || !firestore) {
+      toast({
+        variant: "destructive",
+        title: "Gagal",
+        description: "Gambar yang dipotong tidak ditemukan atau layanan tidak siap.",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    const user = auth.currentUser;
+    const storage = getStorage(firebaseApp);
+    const storageRef = ref(storage, `avatars/${user.uid}/profile.jpg`);
 
     try {
-      // 1. Upload to Storage
-      const storage = getStorage(app);
-      const storageRef = ref(storage, `avatars/${currentUserAuth.uid}/profile.jpg`);
-      const snapshot = await uploadBytes(storageRef, fileBlob);
+      // Upload the cropped image data URL to Firebase Storage
+      const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
       const downloadURL = await getDownloadURL(snapshot.ref);
 
-      // 2. Update Auth & Firestore
-      const userDocumentRef = doc(db, "users", currentUserAuth.uid);
-      
-      await updateProfile(currentUserAuth, { photoURL: downloadURL });
-      await updateDoc(userDocumentRef, { photoURL: downloadURL });
+      // Update Firebase Auth and Firestore
+      const userDoc = doc(firestore, 'users', user.uid);
+      await Promise.all([
+        updateProfile(user, { photoURL: downloadURL }),
+        updateDoc(userDoc, { photoURL: downloadURL })
+      ]);
 
-      // 3. Refetch data to update UI
+      // Refetch user data to update UI and reset state
       await refetchUser();
       await refetchDoc();
-      
-      // 4. Show success notification
+      setCroppedImage(null);
+
       toast({
         title: "Sukses!",
         description: "Foto profil berhasil diperbarui.",
       });
 
     } catch (error) {
-      console.error("Error uploading file:", error);
+      console.error("Error saving cropped image:", error);
       toast({
         variant: "destructive",
-        title: "Gagal Mengunggah",
-        description: "Terjadi kesalahan saat mengunggah foto profil.",
+        title: "Gagal Menyimpan",
+        description: "Terjadi kesalahan saat menyimpan foto profil baru.",
       });
     } finally {
       setIsUploading(false);
     }
   };
 
-
-  async function onSubmit(values: z.infer<typeof passwordSchema>) {
+  async function onSubmitPassword(values: z.infer<typeof passwordSchema>) {
     if (!auth || !authUser || !authUser.email) return;
 
     const credential = EmailAuthProvider.credential(
@@ -224,7 +179,6 @@ export default function ProfileClient() {
     try {
       await reauthenticateWithCredential(authUser, credential);
       await updatePassword(authUser, values.newPassword);
-
       toast({
         title: "Sukses",
         description: "Kata sandi Anda telah berhasil diubah.",
@@ -245,6 +199,7 @@ export default function ProfileClient() {
   }
   
   const isLoading = isAuthLoading || isUserDocLoading;
+  const displayImage = croppedImage || authUser?.photoURL;
 
   return (
     <>
@@ -254,27 +209,23 @@ export default function ProfileClient() {
           <CardHeader>
             <CardTitle>Foto Profil</CardTitle>
             <CardDescription>
-              Klik pada gambar untuk memilih foto baru. Gambar akan dikompres.
+              Klik pada gambar untuk memilih dan memotong foto baru.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
-             {isLoading && !isUploading ? (
+             {isLoading ? (
                 <Skeleton className="h-32 w-32 rounded-full" />
              ) : (
                 <div className="relative">
                     <Avatar className="h-32 w-32 cursor-pointer" onClick={handleAvatarClick}>
-                        <AvatarImage src={authUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
+                        <AvatarImage src={displayImage || ''} alt={currentUser?.nama_teknisi} />
                         <AvatarFallback>
                             <UserCircle className="h-16 w-16" />
                         </AvatarFallback>
                     </Avatar>
-                    {isUploading ? (
-                       <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full text-white text-sm">Uploading...</div>
-                    ) : (
-                       <div className="absolute bottom-1 right-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground cursor-pointer" onClick={handleAvatarClick}>
-                          <Camera className="h-4 w-4" />
-                       </div>
-                    )}
+                    <div className="absolute bottom-1 right-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground cursor-pointer" onClick={handleAvatarClick}>
+                       <Camera className="h-4 w-4" />
+                    </div>
                 </div>
              )}
              <input 
@@ -282,8 +233,7 @@ export default function ProfileClient() {
                 ref={fileInputRef} 
                 onChange={handleFileChange}
                 className="hidden" 
-                accept="image/png, image/jpeg, image/gif"
-                disabled={isUploading}
+                accept="image/png, image/jpeg"
             />
             {isLoading ? (
                 <div className="text-center space-y-2">
@@ -297,6 +247,14 @@ export default function ProfileClient() {
                 </div>
             )}
           </CardContent>
+          {croppedImage && (
+            <CardFooter className="flex-col gap-2">
+                <p className="text-sm text-muted-foreground">Pratinjau telah diperbarui. Klik simpan untuk menerapkan.</p>
+                <Button onClick={handleSaveCroppedImage} disabled={isUploading} className="w-full">
+                    {isUploading ? "Menyimpan..." : "Simpan Foto"}
+                </Button>
+            </CardFooter>
+          )}
         </Card>
 
         <Card>
@@ -308,7 +266,7 @@ export default function ProfileClient() {
           </CardHeader>
           <CardContent>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <form onSubmit={form.handleSubmit(onSubmitPassword)} className="space-y-4">
                 <FormField
                   control={form.control}
                   name="currentPassword"
@@ -356,6 +314,28 @@ export default function ProfileClient() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={isCropping} onOpenChange={setIsCropping}>
+        <DialogContent className="max-w-md">
+            <DialogHeader>
+                <DialogTitle>Potong Gambar</DialogTitle>
+                <DialogDescription>
+                    Sesuaikan gambar Anda. Geser untuk memindahkan dan scroll untuk zoom.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="relative w-full h-80">
+                {imageSrc && <ImageCropper imageSrc={imageSrc} onCropComplete={onCropComplete} />}
+            </div>
+            <DialogFooter>
+                <DialogClose asChild>
+                    <Button variant="outline" onClick={() => setImageSrc(null)}>Batal</Button>
+                </DialogClose>
+                <DialogClose asChild>
+                    <Button onClick={() => setIsCropping(false)}>Potong & Terapkan Pratinjau</Button>
+                </DialogClose>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
