@@ -64,7 +64,7 @@ export default function ProfileClient() {
   const firebaseApp = useFirebaseApp();
   const auth = useAuth();
   const firestore = useFirestore();
-  const { user: authUser, isLoading: isAuthLoading, refetch: refetchUser } = useUser();
+  const { user: authUser, isLoading: isAuthLoading } = useUser();
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
@@ -139,15 +139,14 @@ export default function ProfileClient() {
 
     try {
       const storage = getStorage(firebaseApp);
-      const storageRef = ref(storage, `image/${authUser.uid}/profile.jpg`);
+      const storageRef = ref(storage, `images/${authUser.uid}/profile.jpg`);
 
       // 1. Unggah string Data URI (sebagai teks) ke Firebase Storage.
       const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
       
       // 2. Dapatkan URL publik dari file yang baru diunggah.
       const downloadURL = await getDownloadURL(snapshot.ref);
-
-      // Tampilkan URL di konsol untuk verifikasi
+      
       console.log('Gambar disimpan di URL publik:', downloadURL);
 
       // 3. Perbarui hanya dokumen Firestore dengan URL baru.
@@ -225,7 +224,11 @@ export default function ProfileClient() {
                     <Avatar className="h-32 w-32 cursor-pointer" onClick={handleAvatarClick}>
                         <AvatarImage src={displayImage || ''} alt={currentUser?.nama_teknisi} />
                         <AvatarFallback>
-                            <UserCircle className="h-16 w-16" />
+                            {currentUser?.nama_teknisi ? (
+                                currentUser.nama_teknisi.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+                            ) : (
+                                <UserCircle className="h-16 w-16" />
+                            )}
                         </AvatarFallback>
                     </Avatar>
                     <div className="absolute bottom-1 right-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground cursor-pointer" onClick={handleAvatarClick}>

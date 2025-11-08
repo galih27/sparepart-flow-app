@@ -55,3 +55,5 @@ export async function getCroppedImg(
 
   return canvas.toDataURL('image/jpeg');
 }
+
+    
