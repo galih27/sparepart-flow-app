@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo, useRef } from "react";
@@ -122,6 +123,7 @@ export default function ProfileClient() {
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `avatars/${authUser.uid}/profile.jpg`);
       
+      // Use the blob directly from the croppedImage state
       const snapshot = await uploadBytes(storageRef, croppedImage.blob, { contentType: 'image/jpeg' });
       const downloadURL = await getDownloadURL(snapshot.ref);
 
@@ -319,3 +321,5 @@ export default function ProfileClient() {
     </>
   );
 }
+
+    
