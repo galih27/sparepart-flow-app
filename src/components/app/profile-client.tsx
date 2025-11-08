@@ -142,7 +142,6 @@ export default function ProfileClient() {
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      setIsUploading(true);
       try {
         const compressedBlob = await compressImage(file);
         await handleUpload(compressedBlob);
@@ -150,10 +149,9 @@ export default function ProfileClient() {
         console.error("Error compressing or uploading file:", error);
         toast({
           variant: "destructive",
-          title: "Gagal Mengunggah",
+          title: "Gagal Memproses",
           description: "Terjadi kesalahan saat memproses gambar.",
         });
-        setIsUploading(false);
       } finally {
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
@@ -163,26 +161,34 @@ export default function ProfileClient() {
   };
   
   const handleUpload = async (fileBlob: Blob) => {
-    if (!auth.currentUser || !firebaseApp || !userDocRef) {
-      setIsUploading(false);
+    if (!auth?.currentUser || !firebaseApp || !firestore) {
       return;
     }
 
+    setIsUploading(true);
     try {
+      // 1. Upload to Storage
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `avatars/${auth.currentUser.uid}/profile.jpg`);
-      
       const snapshot = await uploadBytes(storageRef, fileBlob);
       const downloadURL = await getDownloadURL(snapshot.ref);
 
-      await Promise.all([
-          updateProfile(auth.currentUser, { photoURL: downloadURL }),
-          updateDoc(userDocRef, { photoURL: downloadURL })
-      ]);
+      // 2. Update Auth & Firestore
+      // Create a direct doc reference here to ensure it's valid
+      const userDocumentRef = doc(firestore, "users", auth.currentUser.uid);
       
-      await Promise.all([refetchUser(), refetchDoc()]);
+      await updateProfile(auth.currentUser, { photoURL: downloadURL });
+      await updateDoc(userDocumentRef, { photoURL: downloadURL });
+
+      // 3. Refetch data to update UI
+      await refetchUser();
+      await refetchDoc();
       
-      toast({ title: "Sukses!", description: "Foto profil berhasil diperbarui." });
+      // 4. Show success notification
+      toast({
+        title: "Sukses!",
+        description: "Foto profil berhasil diperbarui.",
+      });
 
     } catch (error) {
       console.error("Error uploading file:", error);
@@ -242,7 +248,7 @@ export default function ProfileClient() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
-             {isLoading ? (
+             {isLoading && !isUploading ? (
                 <Skeleton className="h-32 w-32 rounded-full" />
              ) : (
                 <div className="relative">
@@ -343,5 +349,4 @@ export default function ProfileClient() {
     </>
   );
 }
-
     
