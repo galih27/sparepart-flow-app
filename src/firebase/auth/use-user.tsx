@@ -10,24 +10,27 @@ export const useUser = () => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refetch = useCallback(() => {
-    if (!auth) return Promise.resolve();
+  const refetch = useCallback(async () => {
+    if (!auth?.currentUser) {
+      setUser(null);
+      return;
+    }
+    
     setIsLoading(true);
-    return new Promise<void>((resolve) => {
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        currentUser.reload().then(() => {
-          setUser({ ...currentUser }); // Create a new object to trigger re-render
-          setIsLoading(false);
-          resolve();
-        });
-      } else {
-        setUser(null);
-        setIsLoading(false);
-        resolve();
-      }
-    });
+    try {
+      await auth.currentUser.reload();
+      // After reloading, get the fresh user object and update the state
+      const freshUser = auth.currentUser;
+      setUser(freshUser ? { ...freshUser } : null);
+    } catch (error) {
+      console.error("Error refetching user:", error);
+      // Potentially sign the user out if reload fails due to token expiry
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
   }, [auth]);
+
 
   useEffect(() => {
     if (!auth) {
@@ -44,5 +47,3 @@ export const useUser = () => {
 
   return { user, isLoading, refetch };
 };
-
-    

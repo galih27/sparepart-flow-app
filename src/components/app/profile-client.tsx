@@ -149,34 +149,30 @@ export default function ProfileClient() {
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `avatars/${user.uid}/profile.jpg`);
   
-      // Upload the cropped image data URL
       const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
       const downloadURL = await getDownloadURL(snapshot.ref);
   
-      // Update Auth Profile and Firestore Document
       await updateProfile(user, { photoURL: downloadURL });
+      
       const userDoc = doc(firestore, 'users', user.uid);
       await updateDoc(userDoc, { photoURL: downloadURL });
 
-      // Manually refetch user data to ensure UI updates
       await refetchUser();
       await refetchDoc();
   
-      // Reset state and show success
       setCroppedImage(null);
       toast({
         title: "Sukses!",
         description: "Foto profil berhasil diperbarui.",
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving cropped image:", error);
       toast({
         variant: "destructive",
         title: "Gagal Menyimpan",
-        description: "Terjadi kesalahan saat menyimpan foto profil baru.",
+        description: `Terjadi kesalahan saat menyimpan foto profil baru: ${error.message}`,
       });
     } finally {
-      // This is crucial to stop the loading indicator
       setIsUploading(false);
     }
   };
@@ -227,7 +223,7 @@ export default function ProfileClient() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
-             {isLoading ? (
+             {isLoading && !displayImage ? (
                 <Skeleton className="h-32 w-32 rounded-full" />
              ) : (
                 <div className="relative">
@@ -351,3 +347,4 @@ export default function ProfileClient() {
     </>
   );
 }
+
