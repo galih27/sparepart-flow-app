@@ -129,7 +129,7 @@ export default function ProfileClient() {
       await updateDoc(userDocRef, { photoURL: downloadURL });
       
       toast({ title: "Sukses!", description: "Foto profil berhasil diperbarui." });
-      setCroppedImage(null); // Clear cropped image after upload
+      setCroppedImage(null);
     } catch (error) {
       console.error("Error uploading file:", error);
       toast({
@@ -316,5 +316,3 @@ export default function ProfileClient() {
     </>
   );
 }
-
-    
