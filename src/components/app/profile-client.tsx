@@ -214,14 +214,14 @@ export default function ProfileClient() {
             )}
           </CardContent>
           {selectedFile && (
-              <CardFooter className="flex-col gap-2">
-                  <Button onClick={handleUpload} disabled={isUploading} className="w-full">
-                      {isUploading ? "Menyimpan..." : "Simpan Foto"}
-                  </Button>
-                  <Button variant="ghost" onClick={() => { setSelectedFile(null); setPreviewUrl(null); }} disabled={isUploading} className="w-full">
-                      Batal
-                  </Button>
-              </CardFooter>
+            <CardFooter className="flex-col gap-2">
+              <Button onClick={handleUpload} disabled={isUploading} className="w-full">
+                {isUploading ? "Menyimpan..." : "Simpan Foto"}
+              </Button>
+              <Button variant="ghost" onClick={() => { setSelectedFile(null); setPreviewUrl(null); }} disabled={isUploading} className="w-full">
+                Batal
+              </Button>
+            </CardFooter>
           )}
         </Card>
 
