@@ -28,6 +28,7 @@ import { useUser, useDoc, useFirestore } from "@/firebase";
 import { doc } from "firebase/firestore";
 import type { User } from "@/lib/definitions";
 import { Skeleton } from "../ui/skeleton";
+import { getAuth, signOut } from "firebase/auth";
 
 function HeaderContent() {
   const router = useRouter();
@@ -41,10 +42,9 @@ function HeaderContent() {
 
   const { data: currentUser, isLoading: isLoadingRole } = useDoc<User>(userDocRef);
 
-  const userAvatar = PlaceHolderImages.find((img) => img.id === "user-avatar");
-
-  const handleLogout = () => {
-    // Note: We'll implement Firebase sign out later
+  const handleLogout = async () => {
+    const auth = getAuth();
+    await signOut(auth);
     router.push("/login");
   };
 
@@ -72,9 +72,9 @@ function HeaderContent() {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="relative h-9 w-9 rounded-full">
             <Avatar className="h-9 w-9">
-              {userAvatar && <AvatarImage src={userAvatar.imageUrl} alt={currentUser?.nama_teknisi} data-ai-hint={userAvatar.imageHint} />}
+              <AvatarImage src={authUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
               <AvatarFallback>
-                <UserCircle />
+                {isLoading ? <Skeleton className="h-9 w-9 rounded-full" /> : <UserCircle />}
               </AvatarFallback>
             </Avatar>
           </Button>
@@ -96,7 +96,7 @@ function HeaderContent() {
               )}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => router.push('/profile')}>
             <UserCircle className="mr-2 h-4 w-4" />
             <span>Profil ({currentUser?.role || '...'})</span>
           </DropdownMenuItem>

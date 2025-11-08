@@ -1,7 +1,7 @@
 
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useMemo } from "react";
 import Link from "next/link";
 import { doc } from "firebase/firestore";
@@ -75,7 +75,7 @@ function SidebarNavContent() {
             <SidebarMenuItem key={item.href}>
               <Link href={item.href} passHref>
                 <SidebarMenuButton
-                  isActive={pathname === item.href}
+                  isActive={pathname.startsWith(item.href) && (item.href === '/' ? pathname === '/' : true)}
                   tooltip={item.label}
                 >
                   <item.icon />
