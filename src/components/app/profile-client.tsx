@@ -9,7 +9,6 @@ import {
   EmailAuthProvider,
   reauthenticateWithCredential,
   updatePassword,
-  updateProfile,
 } from "firebase/auth";
 import {
   getStorage,
@@ -70,7 +69,6 @@ export default function ProfileClient() {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
-  const [isCropping, setIsCropping] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -91,6 +89,7 @@ export default function ProfileClient() {
   });
 
   const handleAvatarClick = () => {
+    if (isUploading) return;
     fileInputRef.current?.click();
   };
 
@@ -133,35 +132,29 @@ export default function ProfileClient() {
 
 
  const handleSaveCroppedImage = async () => {
-    if (!croppedImage || !authUser || !userDocRef || !firebaseApp) {
-        toast({
-            variant: "destructive",
-            title: "Gagal Menyimpan",
-            description: "Sesi pengguna tidak ditemukan. Coba muat ulang halaman.",
-        });
-        return;
-    }
+    if (!croppedImage || !authUser || !userDocRef || !firebaseApp) return;
 
     setIsUploading(true);
+    
     try {
         const storage = getStorage(firebaseApp);
         const storageRef = ref(storage, `image/${authUser.uid}/profile.jpg`);
 
+        // 1. Upload the cropped image string
         const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
+        
+        // 2. Get the public download URL
         const downloadURL = await getDownloadURL(snapshot.ref);
 
-        // Langsung update dokumen di Firestore
+        // 3. Update only the Firestore document with the new URL
         await updateDoc(userDocRef, { photoURL: downloadURL });
-        
-        // Panggil refetch untuk memperbarui UI
-        await refetchUser();
-        await refetchDoc();
       
         toast({
             title: "Sukses!",
-            description: "Foto profil berhasil diperbarui.",
+            description: "Foto profil berhasil diperbarui. Tampilan akan segera berubah.",
         });
 
+        // Clear the preview image
         setCroppedImage(null);
 
     } catch (error) {
@@ -172,6 +165,7 @@ export default function ProfileClient() {
             description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
         });
     } finally {
+        // 4. ALWAYS ensure the uploading state is reset
         setIsUploading(false);
     }
 };
@@ -207,7 +201,7 @@ export default function ProfileClient() {
   }
   
   const isLoading = isAuthLoading || isUserDocLoading;
-  const displayImage = croppedImage || currentUser?.photoURL || authUser?.photoURL;
+  const displayImage = croppedImage || currentUser?.photoURL;
 
   return (
     <>
@@ -344,5 +338,6 @@ export default function ProfileClient() {
       </Dialog>
     </>
   );
+}
 
     
