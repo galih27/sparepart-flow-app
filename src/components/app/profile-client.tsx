@@ -78,7 +78,7 @@ export default function ProfileClient() {
     return doc(firestore, "users", authUser.uid);
   }, [firestore, authUser]);
 
-  const { data: currentUser, isLoading: isUserDocLoading, refetch: refetchDoc } = useDoc<User>(userDocRef);
+  const { data: currentUser, isLoading: isUserDocLoading } = useDoc<User>(userDocRef);
 
   const form = useForm<z.infer<typeof passwordSchema>>({
     resolver: zodResolver(passwordSchema),
@@ -142,7 +142,6 @@ export default function ProfileClient() {
       const storageRef = ref(storage, `image/${authUser.uid}/profile.jpg`);
 
       // 1. Unggah string Data URI (sebagai teks) ke Firebase Storage.
-      // Firebase Storage akan secara otomatis mengubahnya menjadi file gambar (blob).
       const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
       
       // 2. Dapatkan URL publik dari file yang baru diunggah.

@@ -41,12 +41,14 @@ export const useDoc = <T>(ref: DocumentReference<DocumentData> | null) => {
   }, [ref]);
 
   useEffect(() => {
-    fetchData(); // Initial fetch
-
     if (!ref) {
+      setIsLoading(false);
+      setData(null);
       return;
     }
-    
+
+    setIsLoading(true);
+    // Use onSnapshot for real-time updates
     const unsubscribe = onSnapshot(ref, (doc) => {
       if (doc.exists()) {
         setData({ id: doc.id, ...doc.data() } as T);
@@ -61,10 +63,12 @@ export const useDoc = <T>(ref: DocumentReference<DocumentData> | null) => {
       } satisfies SecurityRuleContext);
       errorEmitter.emit('permission-error', permissionError);
       setIsLoading(false);
+      setData(null);
     });
 
+    // Clean up the listener when the component unmounts or the reference changes
     return () => unsubscribe();
-  }, [ref, fetchData]);
+  }, [ref]);
 
   return { data, isLoading, refetch: fetchData };
 };
