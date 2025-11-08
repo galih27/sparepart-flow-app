@@ -34,7 +34,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { UserCircle, Camera } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,6 +45,16 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import ImageCropper, { type CroppedImage } from "./image-cropper";
 
 const passwordSchema = z
   .object({
@@ -68,9 +77,10 @@ export default function ProfileClient() {
 
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
+  
+  // State for cropping
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
+  const [croppedImage, setCroppedImage] = useState<CroppedImage | null>(null);
 
   const userDocRef = useMemo(() => {
     if (!firestore || !authUser) return null;
@@ -94,30 +104,35 @@ export default function ProfileClient() {
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
-
-    setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImageToCrop(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
   
   const handleUpload = async () => {
-    if (!selectedFile || !authUser) return;
+    if (!croppedImage || !authUser) return;
 
     setIsUploading(true);
     toast({ title: "Mengunggah...", description: "Foto profil Anda sedang diunggah." });
 
     try {
       const storage = getStorage(firebaseApp);
-      const storageRef = ref(storage, `avatars/${authUser.uid}/${selectedFile.name}`);
+      const storageRef = ref(storage, `avatars/${authUser.uid}/profile.jpg`);
       
-      const snapshot = await uploadBytes(storageRef, selectedFile);
+      const response = await fetch(croppedImage.url);
+      const blob = await response.blob();
+
+      const snapshot = await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
       const downloadURL = await getDownloadURL(snapshot.ref);
 
       await updateProfile(authUser, { photoURL: downloadURL });
       
       toast({ title: "Sukses!", description: "Foto profil berhasil diperbarui." });
-      setSelectedFile(null);
-      setPreviewUrl(null);
+      setCroppedImage(null); // Clear cropped image after upload
       router.refresh();
 
     } catch (error) {
@@ -174,7 +189,7 @@ export default function ProfileClient() {
           <CardHeader>
             <CardTitle>Foto Profil</CardTitle>
             <CardDescription>
-              Klik pada gambar untuk memilih foto baru, lalu simpan perubahan.
+              Klik pada gambar untuk memilih dan memotong foto baru.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
@@ -183,7 +198,7 @@ export default function ProfileClient() {
              ) : (
                 <div className="relative">
                     <Avatar className="h-32 w-32 cursor-pointer" onClick={handleAvatarClick}>
-                        <AvatarImage src={previewUrl || authUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
+                        <AvatarImage src={croppedImage?.url || authUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
                         <AvatarFallback>
                             <UserCircle className="h-16 w-16" />
                         </AvatarFallback>
@@ -213,12 +228,12 @@ export default function ProfileClient() {
                 </div>
             )}
           </CardContent>
-          {selectedFile && (
+          {croppedImage && (
             <CardFooter className="flex-col gap-2">
               <Button onClick={handleUpload} disabled={isUploading} className="w-full">
                 {isUploading ? "Menyimpan..." : "Simpan Foto"}
               </Button>
-              <Button variant="ghost" onClick={() => { setSelectedFile(null); setPreviewUrl(null); }} disabled={isUploading} className="w-full">
+              <Button variant="ghost" onClick={() => setCroppedImage(null)} disabled={isUploading} className="w-full">
                 Batal
               </Button>
             </CardFooter>
@@ -282,6 +297,29 @@ export default function ProfileClient() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={!!imageToCrop} onOpenChange={(open) => !open && setImageToCrop(null)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Potong Gambar</DialogTitle>
+            <DialogDescription>
+              Sesuaikan foto profil Anda. Gunakan slider untuk zoom.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="relative h-96 w-full mt-4">
+            {imageToCrop && (
+                <ImageCropper 
+                    image={imageToCrop}
+                    onCropComplete={(croppedImg) => {
+                        setCroppedImage(croppedImg);
+                        setImageToCrop(null);
+                    }}
+                    onCancel={() => setImageToCrop(null)}
+                />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
