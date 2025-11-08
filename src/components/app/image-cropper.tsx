@@ -108,28 +108,35 @@ async function getCroppedImg(
     return null;
   }
 
-  const rotRad = 0;
+  const safeArea = Math.max(image.width, image.height) * 2;
 
-  // set canvas size to match the bounding box
-  canvas.width = image.width;
-  canvas.height = image.height;
+  // set canvas size to guarantee sufficient space for rotated image.
+  canvas.width = safeArea;
+  canvas.height = safeArea;
 
-  // draw rotated image
-  ctx.drawImage(image, 0, 0);
-
-  const data = ctx.getImageData(
-    pixelCrop.x,
-    pixelCrop.y,
-    pixelCrop.width,
-    pixelCrop.height
+  // translate canvas context to a central location to allow boomeranging around the center.
+  ctx.translate(safeArea / 2, safeArea / 2);
+  
+  // draw rotated image and store data.
+  ctx.drawImage(
+    image,
+    safeArea / 2 - image.width * 0.5,
+    safeArea / 2 - image.height * 0.5
   );
+  
+  const data = ctx.getImageData(0, 0, safeArea, safeArea);
 
   // set canvas width to final desired crop size - this will clear existing context
   canvas.width = pixelCrop.width;
   canvas.height = pixelCrop.height;
 
   // paste generated rotate image with correct offsets
-  ctx.putImageData(data, 0, 0);
+  ctx.putImageData(
+    data,
+    Math.round(0 - safeArea / 2 + image.width * 0.5 - pixelCrop.x),
+    Math.round(0 - safeArea / 2 + image.height * 0.5 - pixelCrop.y)
+  );
+
 
   // As a blob
   return new Promise((resolve, reject) => {

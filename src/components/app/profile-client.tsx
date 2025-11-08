@@ -51,8 +51,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
-  DialogClose,
 } from "@/components/ui/dialog";
 import ImageCropper, { type CroppedImage } from "./image-cropper";
 
@@ -111,10 +109,12 @@ export default function ProfileClient() {
       };
       reader.readAsDataURL(file);
     }
+    // Reset file input to allow re-selecting the same file
+    event.target.value = '';
   };
   
   const handleUpload = async () => {
-    if (!croppedImage || !authUser) return;
+    if (!croppedImage || !authUser || !firebaseApp) return;
 
     setIsUploading(true);
     toast({ title: "Mengunggah...", description: "Foto profil Anda sedang diunggah." });
@@ -123,10 +123,7 @@ export default function ProfileClient() {
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `avatars/${authUser.uid}/profile.jpg`);
       
-      const response = await fetch(croppedImage.url);
-      const blob = await response.blob();
-
-      const snapshot = await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+      const snapshot = await uploadBytes(storageRef, croppedImage.blob, { contentType: 'image/jpeg' });
       const downloadURL = await getDownloadURL(snapshot.ref);
 
       await updateProfile(authUser, { photoURL: downloadURL });
@@ -299,14 +296,14 @@ export default function ProfileClient() {
       </div>
 
       <Dialog open={!!imageToCrop} onOpenChange={(open) => !open && setImageToCrop(null)}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="max-h-[90vh] flex flex-col sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Potong Gambar</DialogTitle>
             <DialogDescription>
               Sesuaikan foto profil Anda. Gunakan slider untuk zoom.
             </DialogDescription>
           </DialogHeader>
-          <div className="relative h-96 w-full mt-4">
+          <div className="flex-grow relative mt-4">
             {imageToCrop && (
                 <ImageCropper 
                     image={imageToCrop}
