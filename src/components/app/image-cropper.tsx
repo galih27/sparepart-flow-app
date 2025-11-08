@@ -51,7 +51,7 @@ export default function ImageCropper({ image, onCropComplete, onCancel }: ImageC
   };
 
   return (
-    <div className="flex flex-col h-full flex-grow">
+    <div className="flex flex-col h-full">
         <div className="relative flex-grow">
             <Cropper
                 image={image}
@@ -142,3 +142,4 @@ async function getCroppedImg(
     }, 'image/jpeg');
   });
 }
+
