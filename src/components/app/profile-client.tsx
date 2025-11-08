@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -153,9 +153,8 @@ export default function ProfileClient() {
           title: "Gagal Mengunggah",
           description: "Terjadi kesalahan saat memproses gambar.",
         });
-        setIsUploading(false); // Pastikan berhenti loading jika kompresi gagal
+        setIsUploading(false);
       } finally {
-        // Reset file input
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -164,25 +163,23 @@ export default function ProfileClient() {
   };
   
   const handleUpload = async (fileBlob: Blob) => {
-    if (!authUser || !firebaseApp || !userDocRef) {
+    if (!auth.currentUser || !firebaseApp || !userDocRef) {
       setIsUploading(false);
       return;
     }
 
     try {
       const storage = getStorage(firebaseApp);
-      const storageRef = ref(storage, `avatars/${authUser.uid}/profile.jpg`);
+      const storageRef = ref(storage, `avatars/${auth.currentUser.uid}/profile.jpg`);
       
       const snapshot = await uploadBytes(storageRef, fileBlob);
       const downloadURL = await getDownloadURL(snapshot.ref);
 
-      // Update both Auth and Firestore in parallel
       await Promise.all([
-          auth.currentUser ? updateProfile(auth.currentUser, { photoURL: downloadURL }) : Promise.resolve(),
+          updateProfile(auth.currentUser, { photoURL: downloadURL }),
           updateDoc(userDocRef, { photoURL: downloadURL })
       ]);
       
-      // Refetch user data to show updated photo
       await Promise.all([refetchUser(), refetchDoc()]);
       
       toast({ title: "Sukses!", description: "Foto profil berhasil diperbarui." });
@@ -195,7 +192,6 @@ export default function ProfileClient() {
         description: "Terjadi kesalahan saat mengunggah foto profil.",
       });
     } finally {
-      // This is crucial: always set isUploading to false
       setIsUploading(false);
     }
   };
@@ -246,7 +242,7 @@ export default function ProfileClient() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
-             {isLoading && !isUploading ? (
+             {isLoading ? (
                 <Skeleton className="h-32 w-32 rounded-full" />
              ) : (
                 <div className="relative">
@@ -347,3 +343,5 @@ export default function ProfileClient() {
     </>
   );
 }
+
+    
