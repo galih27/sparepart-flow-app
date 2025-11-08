@@ -133,34 +133,27 @@ export default function ProfileClient() {
 
 
  const handleSaveCroppedImage = async () => {
-    if (!croppedImage || !authUser || !firestore || !firebaseApp) {
+    if (!croppedImage || !authUser || !userDocRef || !firebaseApp) {
         toast({
             variant: "destructive",
             title: "Gagal Menyimpan",
-            description: "Layanan otentikasi tidak siap. Coba lagi.",
+            description: "Sesi pengguna tidak ditemukan. Coba muat ulang halaman.",
         });
         return;
     }
 
     setIsUploading(true);
     try {
-        const user = authUser;
         const storage = getStorage(firebaseApp);
-        // Menyimpan di folder `image` sesuai permintaan
-        const storageRef = ref(storage, `image/${user.uid}/profile.jpg`);
+        const storageRef = ref(storage, `image/${authUser.uid}/profile.jpg`);
 
-        // `uploadString` dengan 'data_url' akan menangani konversi dari base64 ke blob.
         const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
         const downloadURL = await getDownloadURL(snapshot.ref);
 
-        // 1. Perbarui URL di Firebase Authentication
-        await updateProfile(user, { photoURL: downloadURL });
+        // Langsung update dokumen di Firestore
+        await updateDoc(userDocRef, { photoURL: downloadURL });
         
-        // 2. Perbarui URL di dokumen Firestore
-        const userDoc = doc(firestore, 'users', user.uid);
-        await updateDoc(userDoc, { photoURL: downloadURL });
-
-        // 3. Panggil refetch yang sudah diperbaiki untuk memperbarui UI
+        // Panggil refetch untuk memperbarui UI
         await refetchUser();
         await refetchDoc();
       
@@ -179,7 +172,6 @@ export default function ProfileClient() {
             description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
         });
     } finally {
-        // Jaminan bahwa status 'isUploading' akan selalu kembali ke false.
         setIsUploading(false);
     }
 };
@@ -215,7 +207,7 @@ export default function ProfileClient() {
   }
   
   const isLoading = isAuthLoading || isUserDocLoading;
-  const displayImage = croppedImage || authUser?.photoURL;
+  const displayImage = croppedImage || currentUser?.photoURL || authUser?.photoURL;
 
   return (
     <>
@@ -352,4 +344,5 @@ export default function ProfileClient() {
       </Dialog>
     </>
   );
-}
+
+    
