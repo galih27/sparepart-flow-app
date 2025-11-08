@@ -136,7 +136,7 @@ export default function ProfileClient() {
 
 
   const handleSaveCroppedImage = async () => {
-    if (!croppedImage || !auth?.currentUser || !firestore) {
+    if (!croppedImage || !authUser || !firestore) {
       toast({
         variant: "destructive",
         title: "Gagal",
@@ -148,35 +148,46 @@ export default function ProfileClient() {
     setIsUploading(true);
   
     try {
-      const user = auth.currentUser;
+      const user = authUser;
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `avatars/${user.uid}/profile.jpg`);
   
+      // 1. Upload the cropped image data URL
       const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
+      // 2. Get the public download URL
       const downloadURL = await getDownloadURL(snapshot.ref);
   
+      // 3. Update Firebase Auth profile
       await updateProfile(user, { photoURL: downloadURL });
       
+      // 4. Update the user document in Firestore
       const userDoc = doc(firestore, 'users', user.uid);
       await updateDoc(userDoc, { photoURL: downloadURL });
 
+      // 5. Refetch user data to update the UI
       await refetchUser();
       await refetchDoc();
   
-      setCroppedImage(null);
+      setCroppedImage(null); // Clear preview image and hide save button
       toast({
         title: "Sukses!",
         description: "Foto profil berhasil diperbarui.",
       });
     } catch (error: any) {
+        console.error("Error saving profile image:", error);
+        toast({
+          variant: "destructive",
+          title: "Gagal Menyimpan",
+          description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
+        });
         const permissionError = new FirestorePermissionError({
-          path: `users/${auth.currentUser.uid}`,
+          path: `users/${authUser.uid}`,
           operation: 'update',
           requestResourceData: { photoURL: '...'},
         } satisfies SecurityRuleContext);
         errorEmitter.emit('permission-error', permissionError);
     } finally {
-      setIsUploading(false);
+      setIsUploading(false); // Ensure this is always called
     }
   };
   
@@ -350,3 +361,5 @@ export default function ProfileClient() {
     </>
   );
 }
+
+    

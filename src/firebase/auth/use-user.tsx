@@ -1,3 +1,4 @@
+
 'use client';
 
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -18,14 +19,18 @@ export const useUser = () => {
     
     setIsLoading(true);
     try {
+      // Force a token refresh and get the latest user data from Firebase Auth
       await auth.currentUser.reload();
-      // After reloading, get the fresh user object and update the state
+      // After reloading, get the fresh user object which includes the latest profile
       const freshUser = auth.currentUser;
+      // Update the state with a new object to ensure React detects the change
       setUser(freshUser ? { ...freshUser } : null);
     } catch (error) {
       console.error("Error refetching user:", error);
       // Potentially sign the user out if reload fails due to token expiry
-      setUser(null);
+      if (error.code === 'auth/user-token-expired') {
+        setUser(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -47,3 +52,5 @@ export const useUser = () => {
 
   return { user, isLoading, refetch };
 };
+
+    
