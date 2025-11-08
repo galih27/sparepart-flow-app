@@ -17,6 +17,18 @@ export type Permissions = {
   msk_view: boolean;
   msk_edit: boolean;
   msk_delete: boolean;
+  nr_view: boolean;
+  nr_edit: boolean;
+  nr_delete: boolean;
+  tsn_view: boolean;
+  tsn_edit: boolean;
+  tsn_delete: boolean;
+  tsp_view: boolean;
+  tsp_edit: boolean;
+  tsp_delete: boolean;
+  sob_view: boolean;
+  sob_edit: boolean;
+  sob_delete: boolean;
 };
 
 export type Role = 'Admin' | 'Teknisi' | 'Manager' | 'Viewer';
@@ -85,4 +97,22 @@ export type Msk = {
   tanggal_msk: string;
   no_transaksi: string;
   keterangan: string;
+};
+
+// Placeholder types for new entities
+export type Nr = {
+  id?: string;
+  name: string;
+};
+export type Tsn = {
+  id?: string;
+  name: string;
+};
+export type Tsp = {
+  id?: string;
+  name: string;
+};
+export type Sob = {
+  id?: string;
+  name: string;
 };

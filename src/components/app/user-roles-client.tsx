@@ -81,6 +81,18 @@ const permissionsSchema = z.object({
   msk_view: z.boolean(),
   msk_edit: z.boolean(),
   msk_delete: z.boolean(),
+  nr_view: z.boolean(),
+  nr_edit: z.boolean(),
+  nr_delete: z.boolean(),
+  tsn_view: z.boolean(),
+  tsn_edit: z.boolean(),
+  tsn_delete: z.boolean(),
+  tsp_view: z.boolean(),
+  tsp_edit: z.boolean(),
+  tsp_delete: z.boolean(),
+  sob_view: z.boolean(),
+  sob_edit: z.boolean(),
+  sob_delete: z.boolean(),
 });
 
 const editSchema = z.object({
@@ -104,6 +116,10 @@ const rolePermissions: Record<Role, Permissions> = {
     dailybon_view: true, dailybon_edit: true, dailybon_delete: true,
     userrole_view: true, userrole_edit: true, userrole_delete: true,
     msk_view: true, msk_edit: true, msk_delete: true,
+    nr_view: true, nr_edit: true, nr_delete: true,
+    tsn_view: true, tsn_edit: true, tsn_delete: true,
+    tsp_view: true, tsp_edit: true, tsp_delete: true,
+    sob_view: true, sob_edit: true, sob_delete: true,
   },
   Manager: {
     dashboard_view: true, dashboard_edit: true,
@@ -112,6 +128,10 @@ const rolePermissions: Record<Role, Permissions> = {
     dailybon_view: true, dailybon_edit: false, dailybon_delete: false,
     userrole_view: true, userrole_edit: true, userrole_delete: false,
     msk_view: true, msk_edit: true, msk_delete: false,
+    nr_view: true, nr_edit: true, nr_delete: false,
+    tsn_view: true, tsn_edit: true, tsn_delete: false,
+    tsp_view: true, tsp_edit: true, tsp_delete: false,
+    sob_view: true, sob_edit: true, sob_delete: false,
   },
   Teknisi: {
     dashboard_view: true, dashboard_edit: false,
@@ -120,6 +140,10 @@ const rolePermissions: Record<Role, Permissions> = {
     dailybon_view: true, dailybon_edit: true, dailybon_delete: false,
     userrole_view: true, userrole_edit: false, userrole_delete: false,
     msk_view: false, msk_edit: false, msk_delete: false,
+    nr_view: true, nr_edit: false, nr_delete: false,
+    tsn_view: true, tsn_edit: false, tsn_delete: false,
+    tsp_view: true, tsp_edit: false, tsp_delete: false,
+    sob_view: true, sob_edit: false, sob_delete: false,
   },
   Viewer: {
     dashboard_view: true, dashboard_edit: false,
@@ -128,6 +152,10 @@ const rolePermissions: Record<Role, Permissions> = {
     dailybon_view: false, dailybon_edit: false, dailybon_delete: false,
     userrole_view: true, userrole_edit: false, userrole_delete: false,
     msk_view: false, msk_edit: false, msk_delete: false,
+    nr_view: false, nr_edit: false, nr_delete: false,
+    tsn_view: false, tsn_edit: false, tsn_delete: false,
+    tsp_view: false, tsp_edit: false, tsp_delete: false,
+    sob_view: false, sob_edit: false, sob_delete: false,
   },
 };
 
@@ -146,6 +174,18 @@ const permissionLabels: { id: keyof Permissions, label: string }[] = [
     { id: 'msk_view', label: 'View MSK' },
     { id: 'msk_edit', label: 'Edit MSK' },
     { id: 'msk_delete', label: 'Delete MSK' },
+    { id: 'nr_view', label: 'View NR' },
+    { id: 'nr_edit', label: 'Edit NR' },
+    { id: 'nr_delete', label: 'Delete NR' },
+    { id: 'tsn_view', label: 'View TSN' },
+    { id: 'tsn_edit', label: 'Edit TSN' },
+    { id: 'tsn_delete', label: 'Delete TSN' },
+    { id: 'tsp_view', label: 'View TSP' },
+    { id: 'tsp_edit', label: 'Edit TSP' },
+    { id: 'tsp_delete', label: 'Delete TSP' },
+    { id: 'sob_view', label: 'View SOB' },
+    { id: 'sob_edit', label: 'Edit SOB' },
+    { id: 'sob_delete', label: 'Delete SOB' },
     { id: 'userrole_view', label: 'View User Role' },
     { id: 'userrole_edit', label: 'Edit User Role' },
     { id: 'userrole_delete', label: 'Delete User Role' },
@@ -212,8 +252,6 @@ export default function UserRolesClient() {
     try {
       // NOTE: Deleting a user from Firebase Auth is a privileged operation
       // and should ideally be done from a backend server with Admin SDK.
-      // The following `deleteUser` from client-side will likely fail
-      // unless the user has recently signed in.
       // For this app, we will just delete the Firestore record.
       await deleteDoc(doc(firestore, 'users', selectedUser.id));
       
