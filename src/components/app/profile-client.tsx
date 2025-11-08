@@ -142,7 +142,7 @@ export default function ProfileClient() {
     try {
       const user = authUser;
       const storage = getStorage(firebaseApp);
-      const storageRef = ref(storage, `avatars/${user.uid}/profile.jpg`);
+      const storageRef = ref(storage, `image/${user.uid}/profile.jpg`);
 
       // The `croppedImage` is a Base64 encoded Data URI (text).
       // `uploadString` with 'data_url' format handles the conversion to a binary file (Blob) for storage.
@@ -153,7 +153,7 @@ export default function ProfileClient() {
       await updateProfile(user, { photoURL: downloadURL });
       const userDoc = doc(firestore, 'users', user.uid);
       await updateDoc(userDoc, { photoURL: downloadURL });
-
+      
       // Refetch user data to update UI
       await refetchUser();
 
