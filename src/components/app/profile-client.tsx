@@ -45,14 +45,6 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import ImageCropper, { type CroppedImage } from "./image-cropper";
 
 const passwordSchema = z
   .object({
@@ -71,20 +63,17 @@ export default function ProfileClient() {
   const firebaseApp = useFirebaseApp();
   const auth = useAuth();
   const firestore = useFirestore();
-  const { user: authUser, isLoading: isAuthLoading } = useUser();
+  const { user: authUser, isLoading: isAuthLoading, refetch: refetchUser } = useUser();
 
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
-  const [croppedImage, setCroppedImage] = useState<CroppedImage | null>(null);
-
   const userDocRef = useMemo(() => {
     if (!firestore || !authUser) return null;
     return doc(firestore, "users", authUser.uid);
   }, [firestore, authUser]);
 
-  const { data: currentUser, isLoading: isUserDocLoading } = useDoc<User>(userDocRef);
+  const { data: currentUser, isLoading: isUserDocLoading, refetch: refetchDoc } = useDoc<User>(userDocRef);
 
   const form = useForm<z.infer<typeof passwordSchema>>({
     resolver: zodResolver(passwordSchema),
@@ -102,17 +91,12 @@ export default function ProfileClient() {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImageToCrop(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      handleUpload(file);
     }
-    event.target.value = '';
   };
   
-  const handleUpload = async () => {
-    if (!croppedImage || !authUser || !firebaseApp || !userDocRef) return;
+  const handleUpload = async (file: File) => {
+    if (!authUser || !firebaseApp || !userDocRef) return;
 
     setIsUploading(true);
     toast({ title: "Mengunggah...", description: "Foto profil Anda sedang diunggah." });
@@ -121,7 +105,7 @@ export default function ProfileClient() {
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `avatars/${authUser.uid}/profile.jpg`);
       
-      const snapshot = await uploadBytes(storageRef, croppedImage.blob, { contentType: 'image/jpeg' });
+      const snapshot = await uploadBytes(storageRef, file);
       const downloadURL = await getDownloadURL(snapshot.ref);
 
       // Update both Auth and Firestore
@@ -130,8 +114,12 @@ export default function ProfileClient() {
       }
       await updateDoc(userDocRef, { photoURL: downloadURL });
       
+      // Refetch user data to show updated photo
+      await refetchUser();
+      await refetchDoc();
+      
       toast({ title: "Sukses!", description: "Foto profil berhasil diperbarui." });
-      setCroppedImage(null);
+
     } catch (error) {
       console.error("Error uploading file:", error);
       toast({
@@ -141,6 +129,8 @@ export default function ProfileClient() {
       });
     } finally {
       setIsUploading(false);
+      // Clear file input
+      if(fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -186,16 +176,19 @@ export default function ProfileClient() {
           <CardHeader>
             <CardTitle>Foto Profil</CardTitle>
             <CardDescription>
-              Klik pada gambar untuk memilih dan memotong foto baru.
+              Klik pada gambar untuk memilih foto baru.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
-             {isLoading ? (
-                <Skeleton className="h-32 w-32 rounded-full" />
+             {isLoading || isUploading ? (
+                <div className="relative">
+                    <Skeleton className="h-32 w-32 rounded-full" />
+                    {isUploading && <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full text-white text-sm">Uploading...</div>}
+                </div>
              ) : (
                 <div className="relative">
                     <Avatar className="h-32 w-32 cursor-pointer" onClick={handleAvatarClick}>
-                        <AvatarImage src={croppedImage?.url || authUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
+                        <AvatarImage src={authUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
                         <AvatarFallback>
                             <UserCircle className="h-16 w-16" />
                         </AvatarFallback>
@@ -225,16 +218,6 @@ export default function ProfileClient() {
                 </div>
             )}
           </CardContent>
-          {croppedImage && (
-            <CardFooter className="flex-col gap-2">
-              <Button onClick={handleUpload} disabled={isUploading} className="w-full">
-                {isUploading ? "Menyimpan..." : "Simpan Foto"}
-              </Button>
-              <Button variant="ghost" onClick={() => setCroppedImage(null)} disabled={isUploading} className="w-full">
-                Batal
-              </Button>
-            </CardFooter>
-          )}
         </Card>
 
         <Card>
@@ -294,29 +277,6 @@ export default function ProfileClient() {
           </CardContent>
         </Card>
       </div>
-
-      <Dialog open={!!imageToCrop} onOpenChange={(open) => !open && setImageToCrop(null)}>
-        <DialogContent className="max-h-[90vh] flex flex-col sm:max-w-xl p-0">
-          <DialogHeader className="p-6 pb-0">
-            <DialogTitle>Potong Gambar</DialogTitle>
-            <DialogDescription>
-              Sesuaikan foto profil Anda. Gunakan slider untuk zoom.
-            </DialogDescription>
-          </DialogHeader>
-          {imageToCrop && (
-            <div className="flex-grow relative">
-              <ImageCropper
-                image={imageToCrop}
-                onCropComplete={(croppedImg) => {
-                  setCroppedImage(croppedImg);
-                  setImageToCrop(null);
-                }}
-                onCancel={() => setImageToCrop(null)}
-              />
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
