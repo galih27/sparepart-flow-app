@@ -76,7 +76,6 @@ export default function ProfileClient() {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // State for cropping
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<CroppedImage | null>(null);
 
@@ -109,7 +108,6 @@ export default function ProfileClient() {
       };
       reader.readAsDataURL(file);
     }
-    // Reset file input to allow re-selecting the same file
     event.target.value = '';
   };
   
@@ -132,8 +130,6 @@ export default function ProfileClient() {
       
       toast({ title: "Sukses!", description: "Foto profil berhasil diperbarui." });
       setCroppedImage(null); // Clear cropped image after upload
-      router.refresh();
-
     } catch (error) {
       console.error("Error uploading file:", error);
       toast({
@@ -305,7 +301,6 @@ export default function ProfileClient() {
               Sesuaikan foto profil Anda. Gunakan slider untuk zoom.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex-grow relative">
             {imageToCrop && (
                 <ImageCropper 
                     image={imageToCrop}
@@ -316,7 +311,6 @@ export default function ProfileClient() {
                     onCancel={() => setImageToCrop(null)}
                 />
             )}
-          </div>
         </DialogContent>
       </Dialog>
     </>

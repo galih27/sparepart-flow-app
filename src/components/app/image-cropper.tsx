@@ -51,7 +51,7 @@ export default function ImageCropper({ image, onCropComplete, onCancel }: ImageC
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full flex-grow">
         <div className="relative flex-grow">
             <Cropper
                 image={image}
@@ -110,14 +110,11 @@ async function getCroppedImg(
 
   const safeArea = Math.max(image.width, image.height) * 2;
 
-  // set canvas size to guarantee sufficient space for rotated image.
   canvas.width = safeArea;
   canvas.height = safeArea;
 
-  // translate canvas context to a central location to allow boomeranging around the center.
   ctx.translate(safeArea / 2, safeArea / 2);
   
-  // draw rotated image and store data.
   ctx.drawImage(
     image,
     safeArea / 2 - image.width * 0.5,
@@ -126,19 +123,15 @@ async function getCroppedImg(
   
   const data = ctx.getImageData(0, 0, safeArea, safeArea);
 
-  // set canvas width to final desired crop size - this will clear existing context
   canvas.width = pixelCrop.width;
   canvas.height = pixelCrop.height;
 
-  // paste generated rotate image with correct offsets
   ctx.putImageData(
     data,
     Math.round(0 - safeArea / 2 + image.width * 0.5 - pixelCrop.x),
     Math.round(0 - safeArea / 2 + image.height * 0.5 - pixelCrop.y)
   );
 
-
-  // As a blob
   return new Promise((resolve, reject) => {
     canvas.toBlob((file) => {
       if (file) {
