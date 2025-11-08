@@ -5,7 +5,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Trash2, UserCircle } from 'lucide-react';
 import type { User, Role, Permissions } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCollection, useFirestore } from '@/firebase';
@@ -62,6 +62,7 @@ import { Skeleton } from '../ui/skeleton';
 import { Input } from '../ui/input';
 import { Checkbox } from '../ui/checkbox';
 import { Separator } from '../ui/separator';
+import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 
 const permissionsSchema = z.object({
   dashboard_view: z.boolean(),
@@ -343,6 +344,7 @@ export default function UserRolesClient() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>Avatar</TableHead>
                 <TableHead>Nama Teknisi</TableHead>
                 <TableHead>NIK</TableHead>
                 <TableHead>Email</TableHead>
@@ -354,6 +356,7 @@ export default function UserRolesClient() {
               {isLoading ? (
                 Array.from({ length: 5 }).map((_, index) => (
                   <TableRow key={index}>
+                    <TableCell><Skeleton className="h-10 w-10 rounded-full" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[200px]" /></TableCell>
@@ -363,13 +366,21 @@ export default function UserRolesClient() {
                 ))
               ) : !data || data.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center h-24">
+                  <TableCell colSpan={6} className="text-center h-24">
                     Tidak ada data pengguna. Klik 'Tambah User' untuk memulai.
                   </TableCell>
                 </TableRow>
               ) : (
                 data.map(user => (
                   <TableRow key={user.id}>
+                    <TableCell>
+                      <Avatar>
+                        <AvatarImage src={user.photoURL} alt={user.nama_teknisi} />
+                        <AvatarFallback>
+                          <UserCircle className="h-5 w-5" />
+                        </AvatarFallback>
+                      </Avatar>
+                    </TableCell>
                     <TableCell className="font-medium">{user.nama_teknisi}</TableCell>
                     <TableCell>{user.nik}</TableCell>
                     <TableCell>{user.email}</TableCell>
@@ -556,3 +567,5 @@ export default function UserRolesClient() {
     </>
   );
 }
+
+    
