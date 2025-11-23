@@ -76,9 +76,17 @@ const addSchema = z.object({
 
 const editSchema = z.object({
   status_bon: z.enum(["BON", "RECEIVED", "KMP", "CANCELED"]),
-  no_tkl: z.string().min(1, "No. TKL wajib diisi"),
+  no_tkl: z.string().optional(),
   keterangan: z.string().optional(),
-})
+}).refine((data) => {
+    if ((data.status_bon === 'RECEIVED' || data.status_bon === 'KMP') && (!data.no_tkl || data.no_tkl.trim() === '')) {
+      return false;
+    }
+    return true;
+  }, {
+    message: "No. TKL wajib diisi untuk status RECEIVED atau KMP.",
+    path: ['no_tkl'],
+  });
 
 const ITEMS_PER_PAGE = 10;
 
@@ -331,11 +339,11 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
     }
 
     try {
-        const inventoryCol = collection(firestore, 'inventory');
-        const q = query(inventoryCol, where("part", "==", selectedBon.part));
-        
         await runTransaction(firestore, async (transaction) => {
-            const inventorySnapshot = await getDocs(q); // getDocs inside transaction
+            const inventoryCol = collection(firestore, 'inventory');
+            const q = query(inventoryCol, where("part", "==", selectedBon.part));
+            const inventorySnapshot = await getDocs(q); 
+            
             if (inventorySnapshot.empty) {
                 throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
             }
@@ -347,42 +355,51 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
             }
             const currentInventory = inventoryDoc.data() as InventoryItem;
 
-            let stockUpdatedFlag = selectedBon.stock_updated;
-            const changes: Partial<InventoryItem> = {};
+            let stockUpdatedFlag = selectedBon.stock_updated ?? false;
+            const bonUpdateData: any = { ...values };
 
-            // --- SCENARIO 1: CANCELLATION (ROLLBACK) ---
+            // SCENARIO 1: CANCELLATION (ROLLBACK)
             if (newStatus === 'CANCELED' && stockUpdatedFlag) {
-                await handleReverseStock(selectedBon); // This should be part of the transaction
-                stockUpdatedFlag = false; // Stock is now reverted
-            
-            // --- SCENARIO 2: UPGRADE FROM BON (TEMP) TO PERMANENT ---
-            } else if (oldStatus === 'BON' && (newStatus === 'RECEIVED' || newStatus === 'KMP') && stockUpdatedFlag) {
-                changes.qty_baik = currentInventory.qty_baik - selectedBon.qty_dailybon;
-                if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
-            
-            // --- SCENARIO 3: FIRST TIME STOCK DEDUCTION ---
-            } else if (!stockUpdatedFlag) {
+                const changes: Partial<InventoryItem> = {};
+                if (oldStatus === 'BON') {
+                    changes.available_qty = currentInventory.available_qty + selectedBon.qty_dailybon;
+                } else if (oldStatus === 'RECEIVED' || oldStatus === 'KMP') {
+                    changes.qty_baik = currentInventory.qty_baik + selectedBon.qty_dailybon;
+                    changes.available_qty = currentInventory.available_qty + selectedBon.qty_dailybon;
+                }
+                if (Object.keys(changes).length > 0) {
+                  transaction.update(inventoryRef, changes);
+                }
+                stockUpdatedFlag = false;
+            }
+            // SCENARIO 2: UPGRADE FROM BON (TEMP) TO PERMANENT
+            else if (oldStatus === 'BON' && (newStatus === 'RECEIVED' || newStatus === 'KMP') && stockUpdatedFlag) {
+                const changes: Partial<InventoryItem> = {
+                    qty_baik: currentInventory.qty_baik - selectedBon.qty_dailybon
+                };
+                if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi untuk update.");
+                transaction.update(inventoryRef, changes);
+            }
+            // SCENARIO 3: FIRST TIME STOCK DEDUCTION
+            else if (!stockUpdatedFlag) {
+                const changes: Partial<InventoryItem> = {};
                 if (newStatus === 'BON') {
-                    // Temporary deduction
                     changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
                     if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
                 } else if (newStatus === 'RECEIVED' || newStatus === 'KMP') {
-                    // Permanent deduction
                     changes.qty_baik = currentInventory.qty_baik - selectedBon.qty_dailybon;
                     changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
                     if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
                     if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
                 }
-                stockUpdatedFlag = true;
+                if (Object.keys(changes).length > 0) {
+                    transaction.update(inventoryRef, changes);
+                    stockUpdatedFlag = true;
+                }
             }
 
-            // Apply inventory changes if any
-            if (Object.keys(changes).length > 0) {
-                transaction.update(inventoryRef, changes);
-            }
-            
-            // Finally, update the bon document
-            transaction.update(bonRef, { ...values, stock_updated: stockUpdatedFlag });
+            bonUpdateData.stock_updated = stockUpdatedFlag;
+            transaction.update(bonRef, bonUpdateData);
         });
 
         toast({ title: "Sukses", description: "Status bon diperbarui dan stok telah disesuaikan." });
@@ -392,10 +409,6 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
     } catch (error: any) {
         console.error("Gagal onEditSubmit:", error);
         toast({ variant: "destructive", title: "Gagal Update", description: error.message });
-        const permissionError = new FirestorePermissionError({
-            path: bonRef.path, operation: 'update', requestResourceData: values,
-        } satisfies SecurityRuleContext);
-        errorEmitter.emit('permission-error', permissionError);
     }
 }
 
