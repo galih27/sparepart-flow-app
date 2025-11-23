@@ -261,34 +261,72 @@ export default function BonPdsClient() {
   
   async function onAddSubmit(values: z.infer<typeof addSchema>) {
     if (!firestore) return;
-    
-    const newBon: Omit<BonPDS, 'id'> = {
-        part: values.part,
-        deskripsi: values.deskripsi,
-        qty_bonpds: values.qty_bonpds,
-        status_bonpds: values.status_bonpds,
-        site_bonpds: values.site_bonpds,
-        tanggal_bonpds: new Date().toISOString().split('T')[0],
-        no_transaksi: `TRX-PDS-${Date.now()}`,
-        keterangan: values.keterangan || '',
-        stock_updated: false,
-    };
-    
-    addDoc(collection(firestore, 'bon_pds'), newBon)
-      .then(() => {
-        toast({ title: "Sukses", description: "Data Bon PDS berhasil ditambahkan." });
+
+    try {
+        await runTransaction(firestore, async (transaction) => {
+            const inventoryCol = collection(firestore, 'inventory');
+            const q = query(inventoryCol, where("part", "==", values.part));
+            const inventorySnapshot = await getDocs(q);
+
+            if (inventorySnapshot.empty) {
+                throw new Error(`Part ${values.part} tidak ditemukan di inventaris.`);
+            }
+
+            const inventoryRef = inventorySnapshot.docs[0].ref;
+            const inventoryDoc = await transaction.get(inventoryRef);
+            if (!inventoryDoc.exists()) {
+                throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
+            }
+            
+            const currentInventory = inventoryDoc.data() as InventoryItem;
+            const changes: Partial<InventoryItem> = {};
+            let stockUpdatedFlag = false;
+
+            if (values.status_bonpds === 'BON') {
+                changes.available_qty = currentInventory.available_qty - values.qty_bonpds;
+                if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
+                stockUpdatedFlag = true;
+            } else if (values.status_bonpds === 'RECEIVED') {
+                changes.qty_baik = currentInventory.qty_baik - values.qty_bonpds;
+                changes.available_qty = currentInventory.available_qty - values.qty_bonpds;
+                if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
+                if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
+                stockUpdatedFlag = true;
+            }
+
+            if (Object.keys(changes).length > 0) {
+                transaction.update(inventoryRef, changes);
+            }
+
+            const newBonRef = doc(collection(firestore, 'bon_pds'));
+            const newBonData: Omit<BonPDS, 'id'> = {
+                part: values.part,
+                deskripsi: values.deskripsi,
+                qty_bonpds: values.qty_bonpds,
+                status_bonpds: values.status_bonpds,
+                site_bonpds: values.site_bonpds,
+                tanggal_bonpds: new Date().toISOString().split('T')[0],
+                no_transaksi: `TRX-PDS-${Date.now()}`,
+                keterangan: values.keterangan || '',
+                stock_updated: stockUpdatedFlag,
+            };
+            transaction.set(newBonRef, newBonData);
+        });
+
+        toast({ title: "Sukses", description: "Data Bon PDS berhasil ditambahkan dan stok diperbarui." });
         setIsAddModalOpen(false);
         addForm.reset();
-      })
-      .catch(async (serverError) => {
+    } catch (error: any) {
+        console.error("Gagal menambah Bon PDS:", error);
+        toast({ variant: "destructive", title: "Gagal", description: error.message });
         const permissionError = new FirestorePermissionError({
           path: 'bon_pds',
           operation: 'create',
-          requestResourceData: newBon,
+          requestResourceData: values,
         } satisfies SecurityRuleContext);
         errorEmitter.emit('permission-error', permissionError);
-      });
-  }
+    }
+}
 
 async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
@@ -629,7 +667,7 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
                 <DialogClose asChild>
                   <Button type="button" variant="secondary">Batal</Button>
                 </DialogClose>
-                <Button type="submit">Simpan</Button>
+                <Button type="submit" disabled={addForm.formState.isSubmitting}>{addForm.formState.isSubmitting ? 'Menyimpan...' : 'Simpan'}</Button>
               </DialogFooter>
             </form>
           </Form>
