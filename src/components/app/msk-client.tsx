@@ -61,7 +61,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
 import { Skeleton } from '../ui/skeleton';
 
 const formSchema = z.object({
@@ -154,7 +153,7 @@ export default function MskClient() {
   };
   
   const handleEdit = (msk: Msk) => {
-    if (currentUser?.role === 'Admin' || currentUser?.role === 'Manager') {
+    if (permissions?.msk_edit) {
         setSelectedMsk(msk);
         form.reset({
             part: msk.part,
@@ -181,8 +180,57 @@ export default function MskClient() {
     }
   };
 
+  const handleReverseStock = async (msk: Msk) => {
+    if (!firestore || !msk.stock_updated || msk.status_msk !== 'RECEIVED') return;
+
+    const inventoryCol = collection(firestore, 'inventory');
+    const q = query(inventoryCol, where("part", "==", msk.part));
+
+    try {
+        const inventorySnapshot = await getDocs(q);
+        if (inventorySnapshot.empty) {
+            throw new Error(`Part ${msk.part} tidak ditemukan di inventaris untuk di-rollback.`);
+        }
+        const inventoryRef = inventorySnapshot.docs[0].ref;
+
+        await runTransaction(firestore, async (transaction) => {
+            const inventoryDoc = await transaction.get(inventoryRef);
+            if (!inventoryDoc.exists()) {
+                throw new Error("Dokumen inventaris tidak ditemukan saat transaksi rollback.");
+            }
+
+            const currentInventory = inventoryDoc.data() as InventoryItem;
+            // Rollback the addition, so we subtract from the stock
+            const newQtyBaik = currentInventory.qty_baik - msk.qty_msk;
+            const newAvailableQty = currentInventory.available_qty - msk.qty_msk;
+
+            if (newQtyBaik < 0 || newAvailableQty < 0) {
+              console.warn(`Rollback untuk part ${msk.part} akan menghasilkan stok negatif. Proses tetap dilanjutkan.`);
+            }
+
+            transaction.update(inventoryRef, { 
+                qty_baik: newQtyBaik, 
+                available_qty: newAvailableQty 
+            });
+        });
+
+        toast({ title: "Rollback Sukses", description: `Stok untuk part ${msk.part} berhasil dikembalikan.` });
+    } catch (error: any) {
+        console.error("Gagal melakukan rollback stok:", error);
+        toast({
+            variant: "destructive",
+            title: "Gagal Rollback Stok",
+            description: `Gagal mengembalikan stok untuk part ${msk.part}. Mohon periksa manual. Error: ${error.message}`,
+        });
+    }
+};
+
+
   const confirmDelete = async () => {
     if (!selectedMsk || !selectedMsk.id || !firestore) return;
+
+    await handleReverseStock(selectedMsk);
+    
     const mskRef = doc(firestore, 'msk', selectedMsk.id);
     
     deleteDoc(mskRef)
@@ -206,52 +254,80 @@ export default function MskClient() {
     if (!firestore) return;
     
     const isEditing = !!selectedMsk?.id;
-    const mskToSave: Omit<Msk, 'id'> = {
-      ...values, 
-      tanggal_msk: isEditing && selectedMsk ? selectedMsk.tanggal_msk : new Date().toISOString().split('T')[0] 
-    };
+    let mskToSave: Omit<Msk, 'id' | 'tanggal_msk'> & Partial<Pick<Msk, 'tanggal_msk' | 'stock_updated'>> = { ...values };
+
+    if (!isEditing) {
+        mskToSave.tanggal_msk = new Date().toISOString().split('T')[0];
+        mskToSave.stock_updated = false;
+    }
 
     const inventoryCol = collection(firestore, 'inventory');
     const q = query(inventoryCol, where("part", "==", values.part));
     
     try {
         const inventorySnapshot = await getDocs(q);
-        const inventoryDoc = inventorySnapshot.docs.length > 0 ? inventorySnapshot.docs[0] : null;
-        const inventoryRef = inventoryDoc ? inventoryDoc.ref : null;
+        if (inventorySnapshot.empty && values.status_msk === 'RECEIVED') {
+            throw new Error(`Part ${values.part} tidak ada di Report Stock. Tidak dapat menerima barang.`);
+        }
+        const inventoryRef = !inventorySnapshot.empty ? inventorySnapshot.docs[0].ref : null;
 
         await runTransaction(firestore, async (transaction) => {
-            let originalStatus: Msk['status_msk'] | undefined = undefined;
-            let mskRef;
-
+            const mskRef = isEditing ? doc(firestore, 'msk', selectedMsk!.id) : doc(collection(firestore, 'msk'));
+            
+            let originalMsk: Msk | null = null;
             if (isEditing) {
-                if (!selectedMsk?.id) throw new Error("ID MSK tidak ditemukan untuk diedit.");
-                mskRef = doc(firestore, 'msk', selectedMsk.id);
                 const mskDoc = await transaction.get(mskRef);
                 if (!mskDoc.exists()) throw new Error("Dokumen MSK tidak ditemukan.");
-                originalStatus = mskDoc.data().status_msk;
+                originalMsk = mskDoc.data() as Msk;
+            }
+
+            // --- Smart Rollback Logic (for Edit only) ---
+            if (isEditing && originalMsk && originalMsk.stock_updated && originalMsk.status_msk === 'RECEIVED' && values.status_msk !== 'RECEIVED') {
+                if (!inventoryRef) throw new Error("Referensi inventaris tidak ditemukan untuk rollback.");
+                const invDoc = await transaction.get(inventoryRef);
+                if (!invDoc.exists()) throw new Error("Dokumen inventaris tidak ditemukan untuk rollback.");
+                const currentInv = invDoc.data() as InventoryItem;
+                
+                transaction.update(inventoryRef, {
+                    qty_baik: currentInv.qty_baik - originalMsk.qty_msk,
+                    available_qty: currentInv.available_qty - originalMsk.qty_msk
+                });
+
+                // Reset flag so it can be updated again later if status changes back to RECEIVED
+                if (mskToSave.hasOwnProperty('stock_updated')) {
+                  (mskToSave as Msk).stock_updated = false;
+                } else {
+                   Object.assign(mskToSave, { stock_updated: false });
+                }
+            }
+
+            const wasAlreadyReceived = isEditing && originalMsk?.stock_updated && originalMsk?.status_msk === 'RECEIVED';
+            const isNowReceived = values.status_msk === 'RECEIVED';
+            
+            // --- New Stock Addition Logic ---
+            if (isNowReceived && !wasAlreadyReceived) {
+                if (!inventoryRef) throw new Error(`Part ${values.part} tidak ditemukan di Report Stock.`);
+                const invDoc = await transaction.get(inventoryRef);
+                if (!invDoc.exists()) throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
+                const currentInv = invDoc.data() as InventoryItem;
+
+                const qtyToAdd = isEditing ? values.qty_msk - (originalMsk?.qty_msk || 0) : values.qty_msk;
+
+                transaction.update(inventoryRef, {
+                    qty_baik: currentInv.qty_baik + (isEditing ? values.qty_msk : originalMsk?.qty_msk ?? values.qty_msk),
+                    available_qty: currentInv.available_qty + (isEditing ? values.qty_msk : originalMsk?.qty_msk ?? values.qty_msk),
+                });
+                 if (mskToSave.hasOwnProperty('stock_updated')) {
+                  (mskToSave as Msk).stock_updated = true;
+                } else {
+                   Object.assign(mskToSave, { stock_updated: true });
+                }
+            }
+
+            if (isEditing) {
                 transaction.update(mskRef, mskToSave);
             } else {
-                mskRef = doc(collection(firestore, 'msk'));
-                transaction.set(mskRef, mskToSave);
-            }
-            
-            const wasReceived = originalStatus === 'RECEIVED';
-            const isNowReceived = values.status_msk === 'RECEIVED';
-
-            if (!inventoryRef) {
-                if(isNowReceived) {
-                    throw new Error(`Part ${values.part} tidak ditemukan di Report Stock. Transaksi masuk tidak dapat diselesaikan.`);
-                }
-                return;
-            }
-            
-            if (isNowReceived && !wasReceived) {
-                const currentInventoryDoc = await transaction.get(inventoryRef);
-                if (!currentInventoryDoc.exists()) throw new Error(`Part ${values.part} tidak ditemukan di Report Stock saat transaksi.`);
-                const currentInventory = currentInventoryDoc.data() as InventoryItem;
-                const newQtyBaik = currentInventory.qty_baik + values.qty_msk;
-                const newAvailableQty = currentInventory.available_qty + values.qty_msk;
-                transaction.update(inventoryRef, { qty_baik: newQtyBaik, available_qty: newAvailableQty });
+                transaction.set(mskRef, mskToSave as Msk);
             }
         });
 
@@ -261,6 +337,8 @@ export default function MskClient() {
         form.reset();
 
     } catch (error: any) {
+        console.error("Gagal menyimpan MSK:", error);
+        toast({ variant: 'destructive', title: 'Gagal', description: error.message });
         const permissionError = new FirestorePermissionError({
           path: isEditing && selectedMsk?.id ? `msk/${selectedMsk.id}` : 'msk',
           operation: isEditing ? 'update' : 'create',
@@ -271,6 +349,7 @@ export default function MskClient() {
   }
   
   const formatCurrency = (value: number) => {
+    if (isNaN(value)) return 'Rp 0';
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
   }
 
@@ -284,7 +363,7 @@ export default function MskClient() {
   const permissions = currentUser?.permissions;
 
   const renderActionCell = (item: Msk) => {
-    const canEdit = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
+    const canEdit = permissions?.msk_edit;
     const canDelete = permissions?.msk_delete;
 
     return (
@@ -292,7 +371,7 @@ export default function MskClient() {
             <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
                 <Eye className="h-4 w-4" />
             </Button>
-            {canEdit && (
+            {canEdit && item.status_msk !== 'RECEIVED' && (
                  <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
                     <Pencil className="h-4 w-4" />
                 </Button>
@@ -313,7 +392,7 @@ export default function MskClient() {
             <FormItem><FormLabel>Part</FormLabel><FormControl><Input placeholder="PN-001" {...field} disabled={isEdit} /></FormControl><FormMessage /></FormItem>
         )}/>
         <FormField control={form.control} name="deskripsi" render={({ field }) => (
-            <FormItem><FormLabel>Deskripsi</FormLabel><FormControl><Input placeholder="Deskripsi Part" {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem><FormLabel>Deskripsi</FormLabel><FormControl><Input placeholder="Otomatis terisi" {...field} readOnly className="bg-muted" /></FormControl><FormMessage /></FormItem>
         )}/>
         <FormField control={form.control} name="qty_msk" render={({ field }) => (
             <FormItem><FormLabel>Qty</FormLabel><FormControl><Input type="number" {...field} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'} /></FormControl><FormMessage /></FormItem>
@@ -327,7 +406,7 @@ export default function MskClient() {
             render={({ field }) => (
                 <FormItem>
                     <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'}>
                         <FormControl>
                             <SelectTrigger>
                                 <SelectValue placeholder="Pilih Status" />
@@ -354,7 +433,7 @@ export default function MskClient() {
         )}/>
         <DialogFooter className="md:col-span-2">
           <DialogClose asChild><Button type="button" variant="secondary">Batal</Button></DialogClose>
-          <Button type="submit">Simpan</Button>
+          <Button type="submit" disabled={form.formState.isSubmitting || (isEdit && selectedMsk?.status_msk === 'RECEIVED')}>{isEdit ? "Simpan Perubahan" : "Simpan"}</Button>
         </DialogFooter>
       </form>
     </Form>
@@ -377,7 +456,7 @@ export default function MskClient() {
                 }}
               />
             </div>
-          {(currentUser?.role === 'Admin' || currentUser?.role === 'Manager') && (
+          {permissions?.msk_edit && (
             <Button onClick={() => {
               form.reset({
                 part: "",
