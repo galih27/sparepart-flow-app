@@ -251,22 +251,20 @@ export default function DailyBonClient() {
         }
   
         const currentInventory = inventoryDoc.data() as InventoryItem;
-        let newQtyBaik = currentInventory.qty_baik;
-        let newAvailableQty = currentInventory.available_qty;
+        const changes: Partial<InventoryItem> = {};
   
         if (bon.status_bon === 'RECEIVED' || bon.status_bon === 'KMP') {
           // Rollback permanent deduction
-          newQtyBaik += bon.qty_dailybon;
-          newAvailableQty += bon.qty_dailybon;
+          changes.qty_baik = currentInventory.qty_baik + bon.qty_dailybon;
+          changes.available_qty = currentInventory.available_qty + bon.qty_dailybon;
         } else if (bon.status_bon === 'BON') {
           // Rollback temporary deduction
-          newAvailableQty += bon.qty_dailybon;
+          changes.available_qty = currentInventory.available_qty + bon.qty_dailybon;
         }
   
-        transaction.update(inventoryRef, {
-          qty_baik: newQtyBaik,
-          available_qty: newAvailableQty,
-        });
+        if (Object.keys(changes).length > 0) {
+          transaction.update(inventoryRef, changes);
+        }
       });
   
       toast({ title: "Rollback Sukses", description: `Stok untuk part ${bon.part} berhasil dikembalikan.` });
@@ -277,8 +275,7 @@ export default function DailyBonClient() {
         title: "Gagal Rollback Stok",
         description: `Gagal mengembalikan stok untuk part ${bon.part}. Mohon periksa manual. Error: ${error.message}`,
       });
-      // Re-throw the error if you want to stop the delete process on rollback failure
-      // For this implementation, we proceed with deletion even if rollback fails, as requested.
+      throw error; // Re-throw to be caught by the caller if needed
     }
   };
   
@@ -286,9 +283,14 @@ export default function DailyBonClient() {
   const confirmDelete = async () => {
     if (!selectedBon || !selectedBon.id || !firestore) return;
     
-    // Reverse stock if it was previously updated
-    if (selectedBon.stock_updated) {
-      await handleReverseStock(selectedBon);
+    try {
+        // Reverse stock if it was previously updated
+        if (selectedBon.stock_updated) {
+          await handleReverseStock(selectedBon);
+        }
+    } catch (error) {
+        // Log the error but proceed with deletion as per requirement
+        console.error("Gagal rollback stok saat menghapus, tapi penghapusan dilanjutkan:", error);
     }
   
     const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
@@ -310,59 +312,76 @@ export default function DailyBonClient() {
       });
   };
   
-  async function onEditSubmit(values: z.infer<typeof editSchema>) {
+async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
 
     const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
     const newStatus = values.status_bon;
     const oldStatus = selectedBon.status_bon;
 
+    if (newStatus === oldStatus) {
+        updateDoc(bonRef, values).then(() => {
+            toast({ title: "Informasi", description: "Data bon berhasil diperbarui (tanpa perubahan status)." });
+            setIsEditModalOpen(false);
+        }).catch(err => {
+            console.error("Gagal update non-status:", err);
+            toast({ variant: "destructive", title: "Gagal Update", description: "Gagal memperbarui detail bon." });
+        });
+        return;
+    }
+
     try {
         const inventoryCol = collection(firestore, 'inventory');
         const q = query(inventoryCol, where("part", "==", selectedBon.part));
-        const inventorySnapshot = await getDocs(q);
-
-        if (inventorySnapshot.empty) {
-            throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
-        }
-        const inventoryRef = inventorySnapshot.docs[0].ref;
-
+        
         await runTransaction(firestore, async (transaction) => {
+            const inventorySnapshot = await getDocs(q); // getDocs inside transaction
+            if (inventorySnapshot.empty) {
+                throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
+            }
+            const inventoryRef = inventorySnapshot.docs[0].ref;
+
             const inventoryDoc = await transaction.get(inventoryRef);
             if (!inventoryDoc.exists()) {
                 throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
             }
             const currentInventory = inventoryDoc.data() as InventoryItem;
 
-            let stockUpdateNeeded = true;
             let stockUpdatedFlag = selectedBon.stock_updated;
-            
             const changes: Partial<InventoryItem> = {};
 
-            if (oldStatus === 'BON' && (newStatus === 'RECEIVED' || newStatus === 'KMP')) {
-                // Moving from temporary to permanent deduction. Only deduct qty_baik.
+            // --- SCENARIO 1: CANCELLATION (ROLLBACK) ---
+            if (newStatus === 'CANCELED' && stockUpdatedFlag) {
+                await handleReverseStock(selectedBon); // This should be part of the transaction
+                stockUpdatedFlag = false; // Stock is now reverted
+            
+            // --- SCENARIO 2: UPGRADE FROM BON (TEMP) TO PERMANENT ---
+            } else if (oldStatus === 'BON' && (newStatus === 'RECEIVED' || newStatus === 'KMP') && stockUpdatedFlag) {
                 changes.qty_baik = currentInventory.qty_baik - selectedBon.qty_dailybon;
                 if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
-            } else if (!stockUpdatedFlag && newStatus === 'BON') {
-                // First time deduction (temporary)
-                changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
-                if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
+            
+            // --- SCENARIO 3: FIRST TIME STOCK DEDUCTION ---
+            } else if (!stockUpdatedFlag) {
+                if (newStatus === 'BON') {
+                    // Temporary deduction
+                    changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
+                    if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
+                } else if (newStatus === 'RECEIVED' || newStatus === 'KMP') {
+                    // Permanent deduction
+                    changes.qty_baik = currentInventory.qty_baik - selectedBon.qty_dailybon;
+                    changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
+                    if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
+                    if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
+                }
                 stockUpdatedFlag = true;
-            } else if (!stockUpdatedFlag && (newStatus === 'RECEIVED' || newStatus === 'KMP')) {
-                // First time deduction (permanent)
-                changes.qty_baik = currentInventory.qty_baik - selectedBon.qty_dailybon;
-                changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
-                if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
-                if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
-                stockUpdatedFlag = true;
-            } else {
-                stockUpdateNeeded = false;
             }
 
-            if (stockUpdateNeeded) {
+            // Apply inventory changes if any
+            if (Object.keys(changes).length > 0) {
                 transaction.update(inventoryRef, changes);
             }
             
+            // Finally, update the bon document
             transaction.update(bonRef, { ...values, stock_updated: stockUpdatedFlag });
         });
 
@@ -371,8 +390,8 @@ export default function DailyBonClient() {
         setSelectedBon(null);
 
     } catch (error: any) {
+        console.error("Gagal onEditSubmit:", error);
         toast({ variant: "destructive", title: "Gagal Update", description: error.message });
-        // Optionally, emit permission error if that's a possibility
         const permissionError = new FirestorePermissionError({
             path: bonRef.path, operation: 'update', requestResourceData: values,
         } satisfies SecurityRuleContext);
