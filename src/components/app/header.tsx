@@ -79,7 +79,7 @@ function HeaderContent() {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="relative h-9 w-9 rounded-full">
             <Avatar className="h-9 w-9">
-              <AvatarImage src={currentUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
+              <AvatarImage src={authUser?.photoURL || currentUser?.photoURL || ''} alt={currentUser?.nama_teknisi} />
               <AvatarFallback>
                 {isLoading ? (
                   <Skeleton className="h-9 w-9 rounded-full" />
@@ -131,3 +131,5 @@ export default function Header() {
     </Suspense>
   )
 }
+
+    

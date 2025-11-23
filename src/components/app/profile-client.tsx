@@ -9,6 +9,8 @@ import {
   EmailAuthProvider,
   reauthenticateWithCredential,
   updatePassword,
+  getAuth,
+  updateProfile,
 } from "firebase/auth";
 import {
   getStorage,
@@ -17,7 +19,7 @@ import {
   getDownloadURL,
 } from "firebase/storage";
 import { doc, updateDoc } from "firebase/firestore";
-import { useUser, useAuth, useDoc, useFirestore, useFirebaseApp } from "@/firebase";
+import { useUser, useFirestore, useFirebaseApp } from "@/firebase";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@/lib/definitions";
 import type { Area } from 'react-easy-crop';
@@ -62,9 +64,8 @@ const passwordSchema = z
 export default function ProfileClient() {
   const { toast } = useToast();
   const firebaseApp = useFirebaseApp();
-  const auth = useAuth();
   const firestore = useFirestore();
-  const { user: authUser, isLoading: isAuthLoading } = useUser();
+  const { user: authUser, isLoading: isAuthLoading, refetch: refetchUser } = useUser();
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
@@ -133,7 +134,7 @@ export default function ProfileClient() {
 
 
   const handleSaveCroppedImage = async () => {
-    if (!croppedImage || !authUser || !userDocRef || !firebaseApp) {
+     if (!croppedImage || !authUser || !userDocRef || !firebaseApp) {
       toast({
         variant: "destructive",
         title: "Gagal",
@@ -145,27 +146,26 @@ export default function ProfileClient() {
     setIsUploading(true);
 
     try {
-      // 1. Dapatkan referensi penyimpanan
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `images/${authUser.uid}/profile.jpg`);
-
-      // 2. Unggah gambar yang sudah dipotong (sebagai data URL)
-      const snapshot = await uploadString(storageRef, croppedImage, 'data_url');
       
-      // 3. Dapatkan URL publik dari file yang baru diunggah.
-      const downloadURL = await getDownloadURL(snapshot.ref);
-      
-      console.log('Gambar disimpan di URL publik:', downloadURL);
+      await uploadString(storageRef, croppedImage, 'data_url');
+      const downloadURL = await getDownloadURL(storageRef);
 
-      // 4. Perbarui dokumen Firestore dengan URL baru.
       await updateDoc(userDocRef, { photoURL: downloadURL });
-      
+
+      const auth = getAuth(firebaseApp);
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { photoURL: downloadURL });
+      }
+
+      await refetchUser();
+
       toast({
           title: "Sukses!",
           description: "Foto profil berhasil diperbarui.",
       });
 
-      // 5. Bersihkan pratinjau gambar yang dipotong
       setCroppedImage(null);
 
     } catch (error) {
@@ -176,22 +176,22 @@ export default function ProfileClient() {
             description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
         });
     } finally {
-        // 6. Pastikan tombol kembali normal, apa pun yang terjadi.
         setIsUploading(false);
     }
   };
 
   async function onSubmitPassword(values: z.infer<typeof passwordSchema>) {
-    if (!auth || !authUser || !authUser.email) return;
+    const auth = getAuth(firebaseApp);
+    if (!auth || !auth.currentUser || !auth.currentUser.email) return;
 
     const credential = EmailAuthProvider.credential(
-      authUser.email,
+      auth.currentUser.email,
       values.currentPassword
     );
 
     try {
-      await reauthenticateWithCredential(authUser, credential);
-      await updatePassword(authUser, values.newPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      await updatePassword(auth.currentUser, values.newPassword);
       toast({
         title: "Sukses",
         description: "Kata sandi Anda telah berhasil diubah.",
@@ -212,7 +212,7 @@ export default function ProfileClient() {
   }
   
   const isLoading = isAuthLoading || isUserDocLoading;
-  const displayImage = croppedImage || currentUser?.photoURL;
+  const displayImage = croppedImage || authUser?.photoURL || currentUser?.photoURL;
 
   return (
     <>
@@ -354,6 +354,8 @@ export default function ProfileClient() {
     </>
   );
 }
+    
+
     
 
     
