@@ -212,7 +212,7 @@ export default function ProfileClient() {
   }
   
   const isLoading = isAuthLoading || isUserDocLoading;
-  const displayImage = croppedImage || authUser?.photoURL || currentUser?.photoURL;
+  const displayImage = croppedImage || currentUser?.photoURL || authUser?.photoURL;
 
   return (
     <>
@@ -359,3 +359,4 @@ export default function ProfileClient() {
     
 
     
+
