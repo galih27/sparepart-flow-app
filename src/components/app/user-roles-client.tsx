@@ -313,7 +313,7 @@ export default function UserRolesClient() {
         email: values.email,
         role: values.role,
         permissions: rolePermissions[values.role],
-        photoURL: `https://picsum.photos/seed/${authUser.uid}/200/200`,
+        photo: `https://picsum.photos/seed/${authUser.uid}/200/200`,
       };
 
       const userDocRef = doc(firestore, "users", authUser.uid);
@@ -390,7 +390,7 @@ export default function UserRolesClient() {
                   <TableRow key={user.id}>
                     <TableCell>
                       <Avatar>
-                        <AvatarImage src={user.photoURL || `https://picsum.photos/seed/${user.id}/200/200`} alt={user.nama_teknisi} />
+                        <AvatarImage src={user.photo || `https://picsum.photos/seed/${user.id}/200/200`} alt={user.nama_teknisi} />
                         <AvatarFallback>
                           <UserCircle className="h-5 w-5" />
                         </AvatarFallback>

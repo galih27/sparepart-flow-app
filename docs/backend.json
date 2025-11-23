@@ -29,7 +29,8 @@
         "nik": { "type": "string" },
         "nama_teknisi": { "type": "string" },
         "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["Admin", "Teknisi", "Manager"] }
+        "role": { "type": "string", "enum": ["Admin", "Teknisi", "Manager"] },
+        "photo": { "type": "string", "format": "uri" }
       },
       "required": ["users", "nik", "nama_teknisi", "email", "role"]
     },

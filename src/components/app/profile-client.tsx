@@ -64,9 +64,10 @@ export default function ProfileClient() {
   const { toast } = useToast();
   const firebaseApp = useFirebaseApp();
   const firestore = useFirestore();
-  const { user: authUser, isLoading: isAuthLoading } = useUser();
+  const { user: authUser, isLoading: isAuthLoading, refetch: refetchUser } = useUser();
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [croppedImage, setCroppedImage] = useState<string | null>(null);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -106,38 +107,47 @@ export default function ProfileClient() {
     }
   };
 
-  const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
+  const onCropComplete = useCallback((_croppedArea: Area, croppedAreaPixels: Area) => {
     setCroppedAreaPixels(croppedAreaPixels);
   }, []);
 
   const handleCropAndSave = useCallback(async () => {
-    if (!imageSrc || !croppedAreaPixels || !authUser || !userDocRef || !firebaseApp) {
-      toast({
-        variant: "destructive",
-        title: "Gagal Menyimpan",
-        description: "Informasi gambar atau pengguna tidak lengkap. Coba lagi.",
-      });
-      return;
+    if (!imageSrc || !croppedAreaPixels || !authUser || !firebaseApp) {
+        toast({
+            variant: "destructive",
+            title: "Gagal Menyimpan",
+            description: "Informasi gambar atau pengguna tidak lengkap. Coba lagi.",
+        });
+        return;
+    }
+
+    if (!userDocRef) {
+        toast({
+            variant: "destructive",
+            title: "Gagal Menyimpan",
+            description: "Referensi dokumen pengguna tidak ditemukan.",
+        });
+        return;
     }
     
     setIsUploading(true);
     setImageSrc(null); // Close the dialog
 
     try {
-      const croppedImageResult = await getCroppedImg(imageSrc, croppedAreaPixels);
-      
-      const storage = getStorage(firebaseApp);
-      const storageRef = ref(storage, `images/${authUser.uid}/profile.jpg`);
-      
-      await uploadString(storageRef, croppedImageResult, 'data_url');
-      const downloadURL = await getDownloadURL(storageRef);
+        const croppedImageResult = await getCroppedImg(imageSrc, croppedAreaPixels);
+        
+        const storage = getStorage(firebaseApp);
+        const storageRef = ref(storage, `images/${authUser.uid}/profile.jpg`);
+        
+        await uploadString(storageRef, croppedImageResult, 'data_url');
+        const downloadURL = await getDownloadURL(storageRef);
 
-      await updateDoc(userDocRef, { photoURL: downloadURL });
-      
-      toast({
-          title: "Sukses!",
-          description: "Foto profil berhasil diperbarui.",
-      });
+        await updateDoc(userDocRef, { photo: downloadURL });
+        
+        toast({
+            title: "Sukses!",
+            description: "Foto profil berhasil diperbarui.",
+        });
 
     } catch (error) {
         console.error("Error cropping and saving profile image:", error);
@@ -184,7 +194,7 @@ export default function ProfileClient() {
   }
   
   const isLoading = isAuthLoading || isUserDocLoading;
-  const displayImage = currentUser?.photoURL || authUser?.photoURL;
+  const displayImage = currentUser?.photo || authUser?.photoURL;
 
   return (
     <>
