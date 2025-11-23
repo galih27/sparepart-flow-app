@@ -98,6 +98,7 @@ export type Msk = {
   tanggal_msk: string;
   no_transaksi: string;
   keterangan: string;
+  stock_updated?: boolean; // Flag to track if stock has been updated
 };
 
 // Placeholder types for new entities
@@ -117,3 +118,5 @@ export type Sob = {
   id?: string;
   name: string;
 };
+
+    
