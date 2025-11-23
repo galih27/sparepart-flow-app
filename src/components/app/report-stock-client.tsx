@@ -362,6 +362,7 @@ export default function ReportStockClient() {
                 <TableHead>Qty Baik</TableHead>
                 <TableHead>Qty Rusak</TableHead>
                 <TableHead>Lokasi</TableHead>
+                <TableHead>Nilai Selisih</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -376,38 +377,44 @@ export default function ReportStockClient() {
                     <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
                   </TableRow>
                 ))
               ) : paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center h-24">
+                  <TableCell colSpan={9} className="text-center h-24">
                     Tidak ada data. Klik tombol 'Upload Excel' untuk mengimpor data.
                   </TableCell>
                 </TableRow>
               ) : (
-                paginatedData.map(item => (
-                  <TableRow key={item.id}>
-                    <TableCell>
-                      <div className="flex gap-0">
-                        <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        {permissions?.reportstock_delete && (
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
-                            <Trash2 className="h-4 w-4" />
+                paginatedData.map(item => {
+                  const selisihQty = (item.qty_baik + item.qty_rusak) - item.available_qty;
+                  const nilaiSelisih = item.total_harga * selisihQty;
+                  return (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <div className="flex gap-0">
+                          <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+                            <Eye className="h-4 w-4" />
                           </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>{item.part}</TableCell>
-                    <TableCell>{item.deskripsi}</TableCell>
-                    <TableCell>{formatCurrency(item.total_harga)}</TableCell>
-                    <TableCell>{item.available_qty}</TableCell>
-                    <TableCell>{item.qty_baik}</TableCell>
-                    <TableCell>{item.qty_rusak}</TableCell>
-                    <TableCell>{item.lokasi}</TableCell>
-                  </TableRow>
-                ))
+                          {permissions?.reportstock_delete && (
+                            <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>{item.part}</TableCell>
+                      <TableCell>{item.deskripsi}</TableCell>
+                      <TableCell>{formatCurrency(item.total_harga)}</TableCell>
+                      <TableCell>{item.available_qty}</TableCell>
+                      <TableCell>{item.qty_baik}</TableCell>
+                      <TableCell>{item.qty_rusak}</TableCell>
+                      <TableCell>{item.lokasi}</TableCell>
+                      <TableCell>{formatCurrency(nilaiSelisih)}</TableCell>
+                    </TableRow>
+                  )
+                })
               )}
             </TableBody>
           </Table>
