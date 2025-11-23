@@ -327,6 +327,7 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
     const newStatus = values.status_bon;
     const oldStatus = selectedBon.status_bon;
 
+    // If status is unchanged, just update the other fields
     if (newStatus === oldStatus) {
         updateDoc(bonRef, values).then(() => {
             toast({ title: "Informasi", description: "Data bon berhasil diperbarui (tanpa perubahan status)." });
@@ -409,6 +410,12 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
     } catch (error: any) {
         console.error("Gagal onEditSubmit:", error);
         toast({ variant: "destructive", title: "Gagal Update", description: error.message });
+        const permissionError = new FirestorePermissionError({
+            path: bonRef.path,
+            operation: 'update',
+            requestResourceData: values,
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
     }
 }
 
