@@ -5,11 +5,11 @@ import { useState, useMemo, useRef } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Eye, FileDown, FileUp, Pencil, Search, Trash2, MoreVertical } from 'lucide-react';
+import { Eye, FileDown, FileUp, Pencil, Search, Trash2, MoreVertical, Plus } from 'lucide-react';
 import type { InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
-import { collection, doc, updateDoc, writeBatch, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, doc, updateDoc, writeBatch, deleteDoc, getDocs, addDoc } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
@@ -61,6 +61,19 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Textarea } from '../ui/textarea';
+
+const addSchema = z.object({
+  part: z.string().min(1, "Part wajib diisi"),
+  deskripsi: z.string().min(1, "Deskripsi wajib diisi"),
+  harga_dpp: z.coerce.number().min(0, "Harga tidak boleh negatif"),
+  ppn: z.coerce.number().min(0, "PPN tidak boleh negatif"),
+  satuan: z.string().min(1, "Satuan wajib diisi"),
+  qty_baik: z.coerce.number().min(0, "Qty Baik tidak boleh negatif"),
+  qty_rusak: z.coerce.number().min(0, "Qty Rusak tidak boleh negatif"),
+  lokasi: z.string().min(1, "Lokasi wajib diisi"),
+  return_to_factory: z.coerce.number().min(0, "Return tidak boleh negatif"),
+});
 
 const editSchema = z.object({
   qty_baik: z.coerce.number().min(0, "Kuantitas tidak boleh negatif"),
@@ -92,6 +105,7 @@ export default function ReportStockClient() {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
@@ -100,7 +114,22 @@ export default function ReportStockClient() {
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const form = useForm<z.infer<typeof editSchema>>({
+  const addForm = useForm<z.infer<typeof addSchema>>({
+    resolver: zodResolver(addSchema),
+    defaultValues: {
+      part: "",
+      deskripsi: "",
+      harga_dpp: 0,
+      ppn: 0,
+      satuan: "pcs",
+      qty_baik: 0,
+      qty_rusak: 0,
+      lokasi: "",
+      return_to_factory: 0,
+    }
+  });
+
+  const editForm = useForm<z.infer<typeof editSchema>>({
     resolver: zodResolver(editSchema),
   });
 
@@ -123,7 +152,7 @@ export default function ReportStockClient() {
   const handleView = (item: InventoryItem) => {
     setSelectedItem(item);
     setIsEditing(false);
-    form.reset({ 
+    editForm.reset({ 
       qty_baik: item.qty_baik, 
       qty_rusak: item.qty_rusak,
       lokasi: item.lokasi,
@@ -288,7 +317,7 @@ export default function ReportStockClient() {
   };
 
 
-  async function onSubmit(values: z.infer<typeof editSchema>) {
+  async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!selectedItem || !selectedItem.id || !firestore) return;
 
     const itemRef = doc(firestore, 'inventory', selectedItem.id);
@@ -309,6 +338,33 @@ export default function ReportStockClient() {
           path: itemRef.path,
           operation: 'update',
           requestResourceData: updatedData,
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
+      });
+  }
+
+  async function onAddSubmit(values: z.infer<typeof addSchema>) {
+    if (!firestore) return;
+
+    const newItem: Omit<InventoryItem, 'id'> = {
+      ...values,
+      total_harga: values.harga_dpp + values.ppn,
+      available_qty: values.qty_baik,
+      qty_real: values.qty_baik + values.qty_rusak,
+    };
+
+    addDoc(collection(firestore, "inventory"), newItem)
+      .then(async () => {
+        toast({ title: "Sukses", description: "Item inventaris baru berhasil ditambahkan." });
+        setIsAddModalOpen(false);
+        addForm.reset();
+        await refetch();
+      })
+      .catch(async (serverError) => {
+        const permissionError = new FirestorePermissionError({
+          path: 'inventory',
+          operation: 'create',
+          requestResourceData: newItem,
         } satisfies SecurityRuleContext);
         errorEmitter.emit('permission-error', permissionError);
       });
@@ -356,10 +412,16 @@ export default function ReportStockClient() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {permissions?.reportstock_edit && (
+                  <>
+                  <DropdownMenuItem onSelect={() => setIsAddModalOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    <span>Tambah Data</span>
+                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={handleImportClick} disabled={isImporting}>
                     <FileUp className="mr-2 h-4 w-4" />
                     <span>{isImporting ? 'Mengimpor...' : 'Upload Excel'}</span>
                   </DropdownMenuItem>
+                  </>
                 )}
                 <DropdownMenuItem onSelect={handleExport} disabled={isExporting}>
                   <FileDown className="mr-2 h-4 w-4" />
@@ -417,7 +479,7 @@ export default function ReportStockClient() {
               ) : paginatedData.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={9} className="text-center h-24">
-                    Tidak ada data. Klik tombol 'Upload Excel' untuk mengimpor data.
+                    Tidak ada data. Klik 'Upload Excel' atau 'Tambah Data' untuk memulai.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -458,6 +520,51 @@ export default function ReportStockClient() {
           )}
         </div>
       </div>
+
+       {/* Add Data Modal */}
+       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Tambah Item Inventaris Baru</DialogTitle>
+            <DialogDescription>Isi detail untuk menambahkan item baru ke dalam stok.</DialogDescription>
+          </DialogHeader>
+          <Form {...addForm}>
+            <form onSubmit={addForm.handleSubmit(onAddSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4 max-h-[70vh] overflow-y-auto pr-4">
+              <FormField control={addForm.control} name="part" render={({ field }) => (
+                  <FormItem className="md:col-span-1"><FormLabel>Part Number</FormLabel><FormControl><Input placeholder="PN-001" {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
+              <FormField control={addForm.control} name="lokasi" render={({ field }) => (
+                  <FormItem className="md:col-span-1"><FormLabel>Lokasi</FormLabel><FormControl><Input placeholder="Rak A-1" {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
+              <FormField control={addForm.control} name="deskripsi" render={({ field }) => (
+                  <FormItem className="md:col-span-2"><FormLabel>Deskripsi</FormLabel><FormControl><Textarea placeholder="Deskripsi lengkap part..." {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
+              <FormField control={addForm.control} name="harga_dpp" render={({ field }) => (
+                  <FormItem><FormLabel>Harga DPP</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
+              <FormField control={addForm.control} name="ppn" render={({ field }) => (
+                  <FormItem><FormLabel>PPN</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
+               <FormField control={addForm.control} name="qty_baik" render={({ field }) => (
+                  <FormItem><FormLabel>Qty Baik</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
+              <FormField control={addForm.control} name="qty_rusak" render={({ field }) => (
+                  <FormItem><FormLabel>Qty Rusak</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
+              <FormField control={addForm.control} name="satuan" render={({ field }) => (
+                  <FormItem><FormLabel>Satuan</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
+               <FormField control={addForm.control} name="return_to_factory" render={({ field }) => (
+                  <FormItem><FormLabel>Return to Factory</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
+              <DialogFooter className="md:col-span-2 sticky bottom-0 bg-background py-4">
+                <DialogClose asChild><Button type="button" variant="secondary">Batal</Button></DialogClose>
+                <Button type="submit" disabled={addForm.formState.isSubmitting}>Simpan</Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
       
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
@@ -506,10 +613,10 @@ export default function ReportStockClient() {
             </DialogHeader>
             
             {isEditing ? (
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
+              <Form {...editForm}>
+                <form onSubmit={editForm.handleSubmit(onSubmit)} className="space-y-4 py-4">
                   <FormField
-                    control={form.control}
+                    control={editForm.control}
                     name="qty_baik"
                     render={({ field }) => (
                       <FormItem>
@@ -522,7 +629,7 @@ export default function ReportStockClient() {
                     )}
                   />
                   <FormField
-                    control={form.control}
+                    control={editForm.control}
                     name="qty_rusak"
                     render={({ field }) => (
                       <FormItem>
@@ -535,7 +642,7 @@ export default function ReportStockClient() {
                     )}
                   />
                   <FormField
-                    control={form.control}
+                    control={editForm.control}
                     name="lokasi"
                     render={({ field }) => (
                       <FormItem>
@@ -587,15 +694,15 @@ export default function ReportStockClient() {
                   <span className="text-muted-foreground">Lokasi</span>
                   <span>{selectedItem.lokasi}</span>
                 </div>
-                <DialogFooter className="justify-between">
+                <DialogFooter className="sm:justify-between pt-4">
                   <div>
-                    {permissions?.reportstock_delete && <Button variant="destructive" onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" /> Hapus</Button>}
+                    {permissions?.reportstock_delete && <Button variant="destructive" size="sm" onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" /> Hapus</Button>}
                   </div>
                   <div className='flex gap-2'>
                     <DialogClose asChild>
-                      <Button variant="secondary">Tutup</Button>                  
+                      <Button variant="secondary" size="sm">Tutup</Button>                  
                     </DialogClose>
-                    {permissions?.reportstock_edit && <Button onClick={handleEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>}
+                    {permissions?.reportstock_edit && <Button onClick={handleEdit} size="sm"><Pencil className="mr-2 h-4 w-4" /> Edit</Button>}
                   </div>
                 </DialogFooter>
               </div>
@@ -606,3 +713,4 @@ export default function ReportStockClient() {
     </>
   );
 }
+
