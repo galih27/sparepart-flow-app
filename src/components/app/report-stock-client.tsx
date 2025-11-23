@@ -5,7 +5,7 @@ import { useState, useMemo, useRef } from 'react';
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Eye, FileDown, FileUp, Pencil, Search, Trash2 } from 'lucide-react';
+import { Eye, FileDown, FileUp, Pencil, Search, Trash2, MoreVertical } from 'lucide-react';
 import type { InventoryItem, User } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
 import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
@@ -54,6 +54,13 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Skeleton } from '../ui/skeleton';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 const editSchema = z.object({
   qty_baik: z.coerce.number().min(0, "Kuantitas tidak boleh negatif"),
@@ -331,28 +338,48 @@ export default function ReportStockClient() {
                 }}
               />
             </div>
-            {permissions?.reportstock_edit && (
-                <>
-                    <Input
-                        type="file"
-                        ref={fileInputRef}
-                        onChange={handleFileChange}
-                        className="hidden"
-                        accept=".xlsx, .xls"
-                        />
-                    <Button variant="outline" onClick={handleImportClick} disabled={isImporting}>
-                        <FileUp className="mr-2" /> {isImporting ? 'Mengimpor...' : 'Upload Excel'}
-                    </Button>
-                </>
-            )}
-            <Button onClick={handleExport} disabled={isExporting}>
-                <FileDown className="mr-2" /> {isExporting ? 'Mengekspor...' : 'Export Excel'}
-            </Button>
-             {permissions?.reportstock_delete && (
-                <Button variant="destructive" onClick={() => setIsDeletingAll(true)} disabled={isLoading || !initialData || initialData.length === 0}>
-                    <Trash2 className="mr-2" /> Hapus Semua
+            
+            <Input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                className="hidden"
+                accept=".xlsx, .xls"
+            />
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  <MoreVertical className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Menu</span>
                 </Button>
-            )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {permissions?.reportstock_edit && (
+                  <DropdownMenuItem onSelect={handleImportClick} disabled={isImporting}>
+                    <FileUp className="mr-2 h-4 w-4" />
+                    <span>{isImporting ? 'Mengimpor...' : 'Upload Excel'}</span>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={handleExport} disabled={isExporting}>
+                  <FileDown className="mr-2 h-4 w-4" />
+                  <span>{isExporting ? 'Mengekspor...' : 'Export Excel'}</span>
+                </DropdownMenuItem>
+                {permissions?.reportstock_delete && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem 
+                      onSelect={() => setIsDeletingAll(true)} 
+                      disabled={isLoading || !initialData || initialData.length === 0}
+                      className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      <span>Hapus Semua</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
         </div>
       </PageHeader>
 
