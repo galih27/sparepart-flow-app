@@ -312,81 +312,73 @@ export default function DailyBonClient() {
   
   async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
-  
+
     const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
     const newStatus = values.status_bon;
-  
-    // Determine if stock update is needed
-    const shouldUpdateStock = !selectedBon.stock_updated && (newStatus === 'BON' || newStatus === 'RECEIVED' || newStatus === 'KMP');
-  
-    if (shouldUpdateStock) {
-      const inventoryCol = collection(firestore, 'inventory');
-      const q = query(inventoryCol, where("part", "==", selectedBon.part));
-  
-      try {
+    const oldStatus = selectedBon.status_bon;
+
+    try {
+        const inventoryCol = collection(firestore, 'inventory');
+        const q = query(inventoryCol, where("part", "==", selectedBon.part));
         const inventorySnapshot = await getDocs(q);
+
         if (inventorySnapshot.empty) {
-          throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
+            throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
         }
         const inventoryRef = inventorySnapshot.docs[0].ref;
-  
+
         await runTransaction(firestore, async (transaction) => {
-          const inventoryDoc = await transaction.get(inventoryRef);
-          if (!inventoryDoc.exists()) {
-            throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
-          }
-  
-          const currentInventory = inventoryDoc.data() as InventoryItem;
-          let newQtyBaik = currentInventory.qty_baik;
-          let newAvailableQty = currentInventory.available_qty;
-  
-          // Temporary deduction for 'BON' status
-          if (newStatus === 'BON') {
-            newAvailableQty -= selectedBon.qty_dailybon;
-            if (newAvailableQty < 0) throw new Error("Stok 'available' tidak mencukupi.");
-            transaction.update(inventoryRef, { available_qty: newAvailableQty });
-          }
-          // Permanent deduction for 'RECEIVED' or 'KMP'
-          else if (newStatus === 'RECEIVED' || newStatus === 'KMP') {
-            newQtyBaik -= selectedBon.qty_dailybon;
-            newAvailableQty -= selectedBon.qty_dailybon;
-            if (newQtyBaik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
-            if (newAvailableQty < 0) throw new Error("Stok 'available' tidak mencukupi.");
-            transaction.update(inventoryRef, { qty_baik: newQtyBaik, available_qty: newAvailableQty });
-          }
-  
-          // Update the bon with new status and flag
-          transaction.update(bonRef, { ...values, stock_updated: true });
+            const inventoryDoc = await transaction.get(inventoryRef);
+            if (!inventoryDoc.exists()) {
+                throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
+            }
+            const currentInventory = inventoryDoc.data() as InventoryItem;
+
+            let stockUpdateNeeded = true;
+            let stockUpdatedFlag = selectedBon.stock_updated;
+            
+            const changes: Partial<InventoryItem> = {};
+
+            if (oldStatus === 'BON' && (newStatus === 'RECEIVED' || newStatus === 'KMP')) {
+                // Moving from temporary to permanent deduction. Only deduct qty_baik.
+                changes.qty_baik = currentInventory.qty_baik - selectedBon.qty_dailybon;
+                if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
+            } else if (!stockUpdatedFlag && newStatus === 'BON') {
+                // First time deduction (temporary)
+                changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
+                if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
+                stockUpdatedFlag = true;
+            } else if (!stockUpdatedFlag && (newStatus === 'RECEIVED' || newStatus === 'KMP')) {
+                // First time deduction (permanent)
+                changes.qty_baik = currentInventory.qty_baik - selectedBon.qty_dailybon;
+                changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
+                if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
+                if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
+                stockUpdatedFlag = true;
+            } else {
+                stockUpdateNeeded = false;
+            }
+
+            if (stockUpdateNeeded) {
+                transaction.update(inventoryRef, changes);
+            }
+            
+            transaction.update(bonRef, { ...values, stock_updated: stockUpdatedFlag });
         });
-  
+
         toast({ title: "Sukses", description: "Status bon diperbarui dan stok telah disesuaikan." });
         setIsEditModalOpen(false);
         setSelectedBon(null);
-  
-      } catch (error: any) {
-        toast({ variant: "destructive", title: "Gagal Update Stok", description: error.message });
+
+    } catch (error: any) {
+        toast({ variant: "destructive", title: "Gagal Update", description: error.message });
         // Optionally, emit permission error if that's a possibility
         const permissionError = new FirestorePermissionError({
             path: bonRef.path, operation: 'update', requestResourceData: values,
         } satisfies SecurityRuleContext);
         errorEmitter.emit('permission-error', permissionError);
-      }
-    } else {
-      // If no stock update is needed, just update the document
-      updateDoc(bonRef, values)
-        .then(() => {
-          toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
-          setIsEditModalOpen(false);
-          setSelectedBon(null);
-        })
-        .catch(async (serverError) => {
-          const permissionError = new FirestorePermissionError({
-            path: bonRef.path, operation: 'update', requestResourceData: values,
-          } satisfies SecurityRuleContext);
-          errorEmitter.emit('permission-error', permissionError);
-        });
     }
-  }
+}
 
 
   const formatCurrency = (value: number) => {
