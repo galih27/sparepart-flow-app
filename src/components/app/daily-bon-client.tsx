@@ -76,7 +76,7 @@ const addSchema = z.object({
 
 const editSchema = z.object({
   status_bon: z.enum(["BON", "RECEIVED", "KMP", "CANCELED"]),
-  no_tkl: z.string().optional(),
+  no_tkl: z.string().min(1, "No. TKL wajib diisi"),
   keterangan: z.string().optional(),
 })
 
@@ -727,7 +727,7 @@ export default function DailyBonClient() {
                                 <FormItem>
                                     <FormLabel>No. TKL</FormLabel>
                                     <FormControl>
-                                        <Input placeholder="Isi No. TKL jika ada" {...field} value={field.value ?? ''}/>
+                                        <Input placeholder="TKL/JKT/25/11/23/001" {...field} value={field.value ?? ''}/>
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
@@ -806,5 +806,3 @@ export default function DailyBonClient() {
     </>
   );
 }
-
-    
