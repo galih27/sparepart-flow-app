@@ -2,34 +2,34 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+// This function can be marked `async` if using `await` inside
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  // Periksa cookie otentikasi Firebase. Nama cookie ini mungkin perlu disesuaikan
-  // tergantung pada bagaimana Anda mengaturnya di sisi klien.
+  // Nama cookie ini mungkin perlu Anda sesuaikan.
+  // Di aplikasi Firebase, cookie sesi sering kali memiliki nama seperti `__session` atau
+  // yang Anda atur secara kustom. Untuk tujuan pengembangan dengan Auth client-side,
+  // kita akan mencari cookie yang menandakan adanya token.
+  // Di sini, kita akan berasumsi ada cookie bernama 'firebaseIdToken' yang disimpan setelah login.
   const hasToken = request.cookies.has('firebaseIdToken');
+  const isLoginPage = request.nextUrl.pathname.startsWith('/login');
 
-  const isLoginPage = pathname === '/login';
-
-  // Jika pengguna belum login (tidak ada token) dan mencoba mengakses halaman apa pun selain halaman login,
-  // arahkan mereka ke halaman login.
+  // Jika tidak ada token dan pengguna tidak berada di halaman login,
+  // alihkan ke halaman login.
   if (!hasToken && !isLoginPage) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // Jika pengguna sudah login (ada token) dan mencoba mengakses halaman login,
-  // arahkan mereka ke halaman utama (dashboard).
+  // Jika ada token dan pengguna mencoba mengakses halaman login,
+  // alihkan ke halaman utama.
   if (hasToken && isLoginPage) {
     return NextResponse.redirect(new URL('/', request.url));
   }
-
-  // Lanjutkan ke halaman yang diminta jika tidak ada kondisi di atas yang terpenuhi.
+  
+  // Jika tidak ada kondisi di atas yang terpenuhi, lanjutkan seperti biasa.
   return NextResponse.next();
 }
 
+// See "Matching Paths" below to learn more
 export const config = {
-  // Jalankan middleware untuk semua path kecuali yang secara eksplisit dikecualikan.
-  // Ini mencegah middleware berjalan pada file statis, gambar, atau rute API,
-  // yang dapat meningkatkan performa.
   matcher: [
     /*
      * Match all request paths except for the ones starting with:

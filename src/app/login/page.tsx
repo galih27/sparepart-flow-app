@@ -45,6 +45,10 @@ export default function LoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
+      // Simpan token di cookie untuk digunakan oleh middleware
+      const idToken = await user.getIdToken();
+      document.cookie = `firebaseIdToken=${idToken}; path=/; max-age=3600`; // max-age=1 jam
+
       toast({
         title: "Login Berhasil",
         description: `Selamat datang kembali!`,
