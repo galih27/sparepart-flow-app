@@ -65,6 +65,7 @@ import { Input } from '../ui/input';
 import { Checkbox } from '../ui/checkbox';
 import { Separator } from '../ui/separator';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 
 const permissionsSchema = z.object({
   dashboard_view: z.boolean(),
@@ -364,6 +365,7 @@ export default function UserRolesClient() {
                 <TableHead>NIK</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead>Photo URL</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -376,12 +378,13 @@ export default function UserRolesClient() {
                     <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[200px]" /></TableCell>
                     <TableCell><Skeleton className="h-6 w-[80px] rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
                     <TableCell><div className="flex justify-end gap-2"><Skeleton className="h-8 w-8" /><Skeleton className="h-8 w-8" /></div></TableCell>
                   </TableRow>
                 ))
               ) : !data || data.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center h-24">
+                  <TableCell colSpan={7} className="text-center h-24">
                     Tidak ada data pengguna. Klik 'Tambah User' untuk memulai.
                   </TableCell>
                 </TableRow>
@@ -401,6 +404,20 @@ export default function UserRolesClient() {
                     <TableCell>{user.email}</TableCell>
                     <TableCell>
                       <Badge variant={roleVariant[user.role] || 'outline'}>{user.role}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <span className="block max-w-[150px] truncate">
+                              {user.photo || '-'}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{user.photo || 'Tidak ada URL'}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     </TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="icon" onClick={() => handleEdit(user)}>
@@ -582,3 +599,5 @@ export default function UserRolesClient() {
     </>
   );
 }
+
+    
