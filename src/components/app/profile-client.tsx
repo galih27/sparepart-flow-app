@@ -19,7 +19,7 @@ import {
   getDownloadURL,
 } from "firebase/storage";
 import { doc, updateDoc } from "firebase/firestore";
-import { useUser, useFirestore, useFirebaseApp } from "@/firebase";
+import { useUser, useFirestore, useFirebaseApp, useDoc } from "@/firebase";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@/lib/definitions";
 import type { Area } from 'react-easy-crop';
@@ -134,7 +134,7 @@ export default function ProfileClient() {
 
 
   const handleSaveCroppedImage = async () => {
-     if (!croppedImage || !authUser || !userDocRef || !firebaseApp) {
+    if (!croppedImage || !authUser || !userDocRef || !firebaseApp) {
       toast({
         variant: "destructive",
         title: "Gagal",
