@@ -10,7 +10,6 @@ import {
   reauthenticateWithCredential,
   updatePassword,
   getAuth,
-  updateProfile,
 } from "firebase/auth";
 import {
   getStorage,
@@ -65,7 +64,7 @@ export default function ProfileClient() {
   const { toast } = useToast();
   const firebaseApp = useFirebaseApp();
   const firestore = useFirestore();
-  const { user: authUser, isLoading: isAuthLoading, refetch: refetchUser } = useUser();
+  const { user: authUser, isLoading: isAuthLoading } = useUser();
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
@@ -137,8 +136,8 @@ export default function ProfileClient() {
     if (!croppedImage || !authUser || !userDocRef) {
       toast({
         variant: "destructive",
-        title: "Gagal",
-        description: "Informasi pengguna atau gambar tidak ditemukan. Mohon tunggu dan coba lagi.",
+        title: "Gagal Menyimpan",
+        description: "Informasi pengguna atau gambar tidak siap. Silakan coba lagi.",
       });
       return;
     }
@@ -152,13 +151,6 @@ export default function ProfileClient() {
       const downloadURL = await getDownloadURL(storageRef);
 
       await updateDoc(userDocRef, { photoURL: downloadURL });
-      
-      const auth = getAuth(firebaseApp);
-      if (auth.currentUser) {
-        await updateProfile(auth.currentUser, { photoURL: downloadURL });
-      }
-
-      await refetchUser(); 
       
       toast({
           title: "Sukses!",
@@ -352,3 +344,5 @@ export default function ProfileClient() {
     </>
   );
 }
+
+    
