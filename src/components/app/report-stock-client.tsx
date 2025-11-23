@@ -132,10 +132,10 @@ export default function ReportStockClient() {
     }
   };
 
-  const handleDelete = (item: InventoryItem) => {
+  const handleDelete = () => {
     if (currentUser?.permissions.reportstock_delete) {
-      setSelectedItem(item);
-      setIsDeleting(true);
+      setIsModalOpen(false); // Close the view/edit modal
+      setIsDeleting(true); // Open the delete confirmation dialog
     } else {
        toast({ variant: 'destructive', title: 'Akses Ditolak', description: 'Anda tidak memiliki izin untuk menghapus data ini.' });
     }
@@ -374,7 +374,7 @@ export default function ReportStockClient() {
               {isLoading ? (
                 Array.from({ length: 5 }).map((_, index) => (
                   <TableRow key={index}>
-                    <TableCell><div className="flex gap-2"><Skeleton className="h-8 w-8" /><Skeleton className="h-8 w-8" /></div></TableCell>
+                    <TableCell><Skeleton className="h-8 w-8" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[200px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
@@ -402,11 +402,6 @@ export default function ReportStockClient() {
                           <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
                             <Eye className="h-4 w-4" />
                           </Button>
-                          {permissions?.reportstock_delete && (
-                            <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
                         </div>
                       </TableCell>
                       <TableCell>{item.part}</TableCell>
@@ -469,7 +464,12 @@ export default function ReportStockClient() {
 
       {/* View/Edit Modal */}
       {selectedItem && (
-        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <Dialog open={isModalOpen} onOpenChange={(isOpen) => {
+          if (!isOpen) {
+            setIsEditing(false);
+          }
+          setIsModalOpen(isOpen);
+        }}>
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>{isEditing ? `Edit ${selectedItem.part}` : `Detail ${selectedItem.part}`}</DialogTitle>
@@ -558,11 +558,16 @@ export default function ReportStockClient() {
                   <span className="text-muted-foreground">Lokasi</span>
                   <span>{selectedItem.lokasi}</span>
                 </div>
-                <DialogFooter>
-                  <DialogClose asChild>
-                    <Button variant="secondary">Tutup</Button>                  
-                  </DialogClose>
-                  {permissions?.reportstock_edit && <Button onClick={handleEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>}
+                <DialogFooter className="justify-between">
+                  <div>
+                    {permissions?.reportstock_delete && <Button variant="destructive" onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" /> Hapus</Button>}
+                  </div>
+                  <div className='flex gap-2'>
+                    <DialogClose asChild>
+                      <Button variant="secondary">Tutup</Button>                  
+                    </DialogClose>
+                    {permissions?.reportstock_edit && <Button onClick={handleEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>}
+                  </div>
                 </DialogFooter>
               </div>
             )}
@@ -572,4 +577,3 @@ export default function ReportStockClient() {
     </>
   );
 }
-
