@@ -58,6 +58,7 @@ import { Skeleton } from '../ui/skeleton';
 const editSchema = z.object({
   qty_baik: z.coerce.number().min(0, "Kuantitas tidak boleh negatif"),
   qty_rusak: z.coerce.number().min(0, "Kuantitas tidak boleh negatif"),
+  lokasi: z.string().min(1, "Lokasi tidak boleh kosong"),
 });
 
 const ITEMS_PER_PAGE = 10;
@@ -115,7 +116,11 @@ export default function ReportStockClient() {
   const handleView = (item: InventoryItem) => {
     setSelectedItem(item);
     setIsEditing(false);
-    form.reset({ qty_baik: item.qty_baik, qty_rusak: item.qty_rusak });
+    form.reset({ 
+      qty_baik: item.qty_baik, 
+      qty_rusak: item.qty_rusak,
+      lokasi: item.lokasi,
+     });
     setIsModalOpen(true);
   };
 
@@ -500,6 +505,19 @@ export default function ReportStockClient() {
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={form.control}
+                    name="lokasi"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Lokasi</FormLabel>
+                        <FormControl>
+                          <Input {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                   <DialogFooter>
                     <Button type="button" variant="secondary" onClick={() => setIsEditing(false)}>Batal</Button>
                     <Button type="submit">Simpan Perubahan</Button>
@@ -536,6 +554,10 @@ export default function ReportStockClient() {
                   <span className="text-muted-foreground">Return to Factory</span>
                   <span>{selectedItem.return_to_factory} {selectedItem.satuan}</span>
                 </div>
+                 <div className="grid grid-cols-[150px_1fr] items-center gap-4">
+                  <span className="text-muted-foreground">Lokasi</span>
+                  <span>{selectedItem.lokasi}</span>
+                </div>
                 <DialogFooter>
                   <DialogClose asChild>
                     <Button variant="secondary">Tutup</Button>                  
@@ -550,3 +572,4 @@ export default function ReportStockClient() {
     </>
   );
 }
+
