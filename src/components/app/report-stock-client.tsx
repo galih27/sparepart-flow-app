@@ -217,7 +217,10 @@ export default function ReportStockClient() {
 
         const batch = writeBatch(firestore);
         json.forEach((row) => {
-          const docRef = doc(collection(firestore, "inventory")); 
+          const docRef = doc(collection(firestore, "inventory"));
+          const qty_baik = Number(row.qty_baik) || 0;
+          const qty_rusak = Number(row.qty_rusak) || 0;
+
           const inventoryItem: Omit<InventoryItem, 'id'> = {
             part: row.part || '',
             deskripsi: row.deskripsi || '',
@@ -225,12 +228,12 @@ export default function ReportStockClient() {
             ppn: Number(row.ppn) || 0,
             total_harga: Number(row.total_harga) || 0,
             satuan: row.satuan || 'pcs',
-            available_qty: (Number(row.qty_baik) || 0) + (Number(row.qty_rusak) || 0),
-            qty_baik: Number(row.qty_baik) || 0,
-            qty_rusak: Number(row.qty_rusak) || 0,
+            available_qty: qty_baik,
+            qty_baik: qty_baik,
+            qty_rusak: qty_rusak,
             lokasi: row.lokasi || '',
             return_to_factory: Number(row.return_to_factory) || 0,
-            qty_real: (Number(row.qty_baik) || 0) + (Number(row.qty_rusak) || 0),
+            qty_real: qty_baik + qty_rusak,
           };
           batch.set(docRef, inventoryItem);
         });
@@ -284,7 +287,6 @@ export default function ReportStockClient() {
     const itemRef = doc(firestore, 'inventory', selectedItem.id);
     const updatedData = {
       ...values,
-      available_qty: values.qty_baik + values.qty_rusak,
       qty_real: values.qty_baik + values.qty_rusak,
     };
     
