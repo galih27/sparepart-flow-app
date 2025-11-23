@@ -134,17 +134,16 @@ export default function ProfileClient() {
 
 
   const handleSaveCroppedImage = async () => {
-    if (!croppedImage || !authUser || !userDocRef || !firebaseApp) {
+    if (!croppedImage || !authUser || !userDocRef) {
       toast({
         variant: "destructive",
         title: "Gagal",
-        description: "Informasi pengguna atau gambar tidak ditemukan.",
+        description: "Informasi pengguna atau gambar tidak ditemukan. Mohon tunggu dan coba lagi.",
       });
       return;
     }
 
     setIsUploading(true);
-
     try {
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `images/${authUser.uid}/profile.jpg`);
@@ -153,19 +152,18 @@ export default function ProfileClient() {
       const downloadURL = await getDownloadURL(storageRef);
 
       await updateDoc(userDocRef, { photoURL: downloadURL });
-
+      
       const auth = getAuth(firebaseApp);
       if (auth.currentUser) {
         await updateProfile(auth.currentUser, { photoURL: downloadURL });
       }
 
-      await refetchUser();
-
+      await refetchUser(); 
+      
       toast({
           title: "Sukses!",
           description: "Foto profil berhasil diperbarui.",
       });
-
       setCroppedImage(null);
 
     } catch (error) {
@@ -354,9 +352,3 @@ export default function ProfileClient() {
     </>
   );
 }
-    
-
-    
-
-    
-
