@@ -614,7 +614,7 @@ export default function ReportStockClient() {
             
             {isEditing ? (
               <Form {...editForm}>
-                <form onSubmit={editForm.handleSubmit(onSubmit)} className="space-y-4 py-4">
+                <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4 py-4">
                   <FormField
                     control={editForm.control}
                     name="qty_baik"
@@ -713,4 +713,3 @@ export default function ReportStockClient() {
     </>
   );
 }
-
