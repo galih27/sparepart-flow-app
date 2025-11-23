@@ -231,10 +231,68 @@ export default function DailyBonClient() {
     }
   };
 
+  const handleReverseStock = async (bon: DailyBon) => {
+    if (!firestore) return;
+  
+    const inventoryCol = collection(firestore, 'inventory');
+    const q = query(inventoryCol, where("part", "==", bon.part));
+  
+    try {
+      const inventorySnapshot = await getDocs(q);
+      if (inventorySnapshot.empty) {
+        throw new Error(`Part ${bon.part} tidak ditemukan di inventaris.`);
+      }
+      const inventoryRef = inventorySnapshot.docs[0].ref;
+  
+      await runTransaction(firestore, async (transaction) => {
+        const inventoryDoc = await transaction.get(inventoryRef);
+        if (!inventoryDoc.exists()) {
+          throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
+        }
+  
+        const currentInventory = inventoryDoc.data() as InventoryItem;
+        let newQtyBaik = currentInventory.qty_baik;
+        let newAvailableQty = currentInventory.available_qty;
+  
+        if (bon.status_bon === 'RECEIVED' || bon.status_bon === 'KMP') {
+          // Rollback permanent deduction
+          newQtyBaik += bon.qty_dailybon;
+          newAvailableQty += bon.qty_dailybon;
+        } else if (bon.status_bon === 'BON') {
+          // Rollback temporary deduction
+          newAvailableQty += bon.qty_dailybon;
+        }
+  
+        transaction.update(inventoryRef, {
+          qty_baik: newQtyBaik,
+          available_qty: newAvailableQty,
+        });
+      });
+  
+      toast({ title: "Rollback Sukses", description: `Stok untuk part ${bon.part} berhasil dikembalikan.` });
+    } catch (error: any) {
+      console.error("Gagal melakukan rollback stok:", error);
+      toast({
+        variant: "destructive",
+        title: "Gagal Rollback Stok",
+        description: `Gagal mengembalikan stok untuk part ${bon.part}. Mohon periksa manual. Error: ${error.message}`,
+      });
+      // Re-throw the error if you want to stop the delete process on rollback failure
+      // For this implementation, we proceed with deletion even if rollback fails, as requested.
+    }
+  };
+  
+
   const confirmDelete = async () => {
     if (!selectedBon || !selectedBon.id || !firestore) return;
+    
+    // Reverse stock if it was previously updated
+    if (selectedBon.stock_updated) {
+      await handleReverseStock(selectedBon);
+    }
+  
     const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
-
+  
     deleteDoc(bonRef)
       .then(() => {
         toast({ title: "Sukses", description: "Bon harian telah dihapus." });
@@ -252,79 +310,83 @@ export default function DailyBonClient() {
       });
   };
   
-async function onEditSubmit(values: z.infer<typeof editSchema>) {
+  async function onEditSubmit(values: z.infer<typeof editSchema>) {
     if (!firestore || !selectedBon || !selectedBon.id) return;
-
+  
     const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
     const newStatus = values.status_bon;
-    
-    // Logic to reduce stock if status is changed to RECEIVED or KMP
-    const shouldUpdateStock = (newStatus === 'RECEIVED' || newStatus === 'KMP') && !selectedBon.stock_updated;
-
+  
+    // Determine if stock update is needed
+    const shouldUpdateStock = !selectedBon.stock_updated && (newStatus === 'BON' || newStatus === 'RECEIVED' || newStatus === 'KMP');
+  
     if (shouldUpdateStock) {
-        // Find the corresponding inventory item before starting the transaction
-        const inventoryCol = collection(firestore, 'inventory');
-        const q = query(inventoryCol, where("part", "==", selectedBon.part));
+      const inventoryCol = collection(firestore, 'inventory');
+      const q = query(inventoryCol, where("part", "==", selectedBon.part));
+  
+      try {
         const inventorySnapshot = await getDocs(q);
-
         if (inventorySnapshot.empty) {
-            toast({ variant: "destructive", title: "Gagal", description: `Part ${selectedBon.part} tidak ditemukan di Report Stock.` });
-            return;
+          throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
         }
-        const inventoryDoc = inventorySnapshot.docs[0];
-        const inventoryRef = inventoryDoc.ref;
-
-        runTransaction(firestore, async (transaction) => {
-            const inventoryDoc = await transaction.get(inventoryRef);
-            if (!inventoryDoc.exists()) {
-                throw new Error("Part tidak ditemukan di inventaris.");
-            }
-
-            const currentInventory = inventoryDoc.data() as InventoryItem;
-            const newQtyBaik = currentInventory.qty_baik - selectedBon.qty_dailybon;
-            if (newQtyBaik < 0) {
-                throw new Error(`Stok 'baik' untuk part ${selectedBon.part} tidak mencukupi.`);
-            }
-            const newAvailableQty = currentInventory.available_qty - selectedBon.qty_dailybon;
-
-            // Update inventory
-            transaction.update(inventoryRef, {
-                qty_baik: newQtyBaik,
-                available_qty: newAvailableQty,
-            });
-
-            // Update the bon with new status and flag
-            transaction.update(bonRef, {
-                ...values,
-                stock_updated: true,
-            });
-        }).then(() => {
-            toast({ title: "Sukses", description: "Status bon diperbarui dan stok telah dikurangi." });
-            setIsEditModalOpen(false);
-            setSelectedBon(null);
-        }).catch(async (serverError) => {
-            const permissionError = new FirestorePermissionError({
-                path: bonRef.path,
-                operation: 'update',
-                requestResourceData: values,
-            } satisfies SecurityRuleContext);
-            errorEmitter.emit('permission-error', permissionError);
+        const inventoryRef = inventorySnapshot.docs[0].ref;
+  
+        await runTransaction(firestore, async (transaction) => {
+          const inventoryDoc = await transaction.get(inventoryRef);
+          if (!inventoryDoc.exists()) {
+            throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
+          }
+  
+          const currentInventory = inventoryDoc.data() as InventoryItem;
+          let newQtyBaik = currentInventory.qty_baik;
+          let newAvailableQty = currentInventory.available_qty;
+  
+          // Temporary deduction for 'BON' status
+          if (newStatus === 'BON') {
+            newAvailableQty -= selectedBon.qty_dailybon;
+            if (newAvailableQty < 0) throw new Error("Stok 'available' tidak mencukupi.");
+            transaction.update(inventoryRef, { available_qty: newAvailableQty });
+          }
+          // Permanent deduction for 'RECEIVED' or 'KMP'
+          else if (newStatus === 'RECEIVED' || newStatus === 'KMP') {
+            newQtyBaik -= selectedBon.qty_dailybon;
+            newAvailableQty -= selectedBon.qty_dailybon;
+            if (newQtyBaik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
+            if (newAvailableQty < 0) throw new Error("Stok 'available' tidak mencukupi.");
+            transaction.update(inventoryRef, { qty_baik: newQtyBaik, available_qty: newAvailableQty });
+          }
+  
+          // Update the bon with new status and flag
+          transaction.update(bonRef, { ...values, stock_updated: true });
         });
+  
+        toast({ title: "Sukses", description: "Status bon diperbarui dan stok telah disesuaikan." });
+        setIsEditModalOpen(false);
+        setSelectedBon(null);
+  
+      } catch (error: any) {
+        toast({ variant: "destructive", title: "Gagal Update Stok", description: error.message });
+        // Optionally, emit permission error if that's a possibility
+        const permissionError = new FirestorePermissionError({
+            path: bonRef.path, operation: 'update', requestResourceData: values,
+        } satisfies SecurityRuleContext);
+        errorEmitter.emit('permission-error', permissionError);
+      }
     } else {
-        updateDoc(bonRef, values).then(() => {
-            toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
-            setIsEditModalOpen(false);
-            setSelectedBon(null);
-        }).catch(async (serverError) => {
-            const permissionError = new FirestorePermissionError({
-                path: bonRef.path,
-                operation: 'update',
-                requestResourceData: values,
-            } satisfies SecurityRuleContext);
-            errorEmitter.emit('permission-error', permissionError);
+      // If no stock update is needed, just update the document
+      updateDoc(bonRef, values)
+        .then(() => {
+          toast({ title: "Sukses", description: "Status bon berhasil diperbarui." });
+          setIsEditModalOpen(false);
+          setSelectedBon(null);
+        })
+        .catch(async (serverError) => {
+          const permissionError = new FirestorePermissionError({
+            path: bonRef.path, operation: 'update', requestResourceData: values,
+          } satisfies SecurityRuleContext);
+          errorEmitter.emit('permission-error', permissionError);
         });
     }
-}
+  }
 
 
   const formatCurrency = (value: number) => {
@@ -744,3 +806,5 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
     </>
   );
 }
+
+    
