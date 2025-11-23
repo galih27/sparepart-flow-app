@@ -67,10 +67,8 @@ export default function ProfileClient() {
   const { user: authUser, isLoading: isAuthLoading } = useUser();
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [croppedImage, setCroppedImage] = useState<string | null>(null);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [isCropping, setIsCropping] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const userDocRef = useMemo(() => {
@@ -100,7 +98,6 @@ export default function ProfileClient() {
       const reader = new FileReader();
       reader.addEventListener('load', () => {
         setImageSrc(reader.result as string);
-        setIsCropping(true);
       });
       reader.readAsDataURL(file);
       if (fileInputRef.current) {
@@ -113,41 +110,26 @@ export default function ProfileClient() {
     setCroppedAreaPixels(croppedAreaPixels);
   }, []);
 
-  const handleApplyCrop = useCallback(async () => {
-    if (imageSrc && croppedAreaPixels) {
-      try {
-        const croppedImageResult = await getCroppedImg(imageSrc, croppedAreaPixels);
-        setCroppedImage(croppedImageResult);
-        setIsCropping(false);
-        setImageSrc(null);
-      } catch (e) {
-        console.error(e);
-        toast({
-          variant: "destructive",
-          title: "Gagal Memotong Gambar",
-          description: "Terjadi kesalahan saat memotong gambar.",
-        });
-      }
-    }
-  }, [imageSrc, croppedAreaPixels, toast]);
-
-
-  const handleSaveCroppedImage = async () => {
-    if (!croppedImage || !authUser || !userDocRef) {
+  const handleCropAndSave = useCallback(async () => {
+    if (!imageSrc || !croppedAreaPixels || !authUser || !userDocRef || !firebaseApp) {
       toast({
         variant: "destructive",
         title: "Gagal Menyimpan",
-        description: "Informasi pengguna atau gambar tidak siap. Silakan coba lagi.",
+        description: "Informasi gambar atau pengguna tidak lengkap. Coba lagi.",
       });
       return;
     }
-
+    
     setIsUploading(true);
+    setImageSrc(null); // Close the dialog
+
     try {
+      const croppedImageResult = await getCroppedImg(imageSrc, croppedAreaPixels);
+      
       const storage = getStorage(firebaseApp);
       const storageRef = ref(storage, `images/${authUser.uid}/profile.jpg`);
       
-      await uploadString(storageRef, croppedImage, 'data_url');
+      await uploadString(storageRef, croppedImageResult, 'data_url');
       const downloadURL = await getDownloadURL(storageRef);
 
       await updateDoc(userDocRef, { photoURL: downloadURL });
@@ -156,19 +138,19 @@ export default function ProfileClient() {
           title: "Sukses!",
           description: "Foto profil berhasil diperbarui.",
       });
-      setCroppedImage(null);
 
     } catch (error) {
-        console.error("Error saving profile image:", error);
+        console.error("Error cropping and saving profile image:", error);
         toast({
             variant: "destructive",
             title: "Gagal Menyimpan",
-            description: "Terjadi kesalahan saat menyimpan foto profil. Coba lagi.",
+            description: "Terjadi kesalahan saat memotong atau menyimpan foto profil.",
         });
     } finally {
         setIsUploading(false);
     }
-  };
+  }, [imageSrc, croppedAreaPixels, authUser, userDocRef, firebaseApp, toast]);
+
 
   async function onSubmitPassword(values: z.infer<typeof passwordSchema>) {
     const auth = getAuth(firebaseApp);
@@ -202,7 +184,7 @@ export default function ProfileClient() {
   }
   
   const isLoading = isAuthLoading || isUserDocLoading;
-  const displayImage = croppedImage || currentUser?.photoURL || authUser?.photoURL;
+  const displayImage = currentUser?.photoURL || authUser?.photoURL;
 
   return (
     <>
@@ -254,14 +236,11 @@ export default function ProfileClient() {
                 </div>
             )}
           </CardContent>
-          {croppedImage && (
-            <CardFooter className="flex-col gap-2">
-                <p className="text-sm text-muted-foreground">Pratinjau telah diperbarui. Klik simpan untuk menerapkan.</p>
-                <Button onClick={handleSaveCroppedImage} disabled={isUploading} className="w-full">
-                    {isUploading ? "Menyimpan..." : "Simpan Foto"}
-                </Button>
-            </CardFooter>
-          )}
+          <CardFooter>
+            <Button onClick={handleAvatarClick} disabled={isUploading} className="w-full">
+              {isUploading ? "Menyimpan..." : "Ubah Foto"}
+            </Button>
+          </CardFooter>
         </Card>
 
         <Card>
@@ -322,7 +301,7 @@ export default function ProfileClient() {
         </Card>
       </div>
 
-      <Dialog open={isCropping} onOpenChange={setIsCropping}>
+      <Dialog open={!!imageSrc} onOpenChange={(open) => !open && setImageSrc(null)}>
         <DialogContent className="max-w-md">
             <DialogHeader>
                 <DialogTitle>Potong Gambar</DialogTitle>
@@ -335,14 +314,14 @@ export default function ProfileClient() {
             </div>
             <DialogFooter>
                 <DialogClose asChild>
-                    <Button variant="outline" onClick={() => {setIsCropping(false); setImageSrc(null);}}>Batal</Button>
+                    <Button variant="outline" onClick={() => setImageSrc(null)}>Batal</Button>
                 </DialogClose>
-                <Button onClick={handleApplyCrop}>Potong & Terapkan Pratinjau</Button>
+                <Button onClick={handleCropAndSave} disabled={isUploading}>
+                  {isUploading ? "Menyimpan..." : "Potong & Simpan"}
+                </Button>
             </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
   );
 }
-
-    
