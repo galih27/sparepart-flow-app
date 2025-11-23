@@ -62,6 +62,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from '../ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 
 const addSchema = z.object({
   part: z.string().min(1, "Part wajib diisi"),
@@ -140,6 +141,16 @@ export default function ReportStockClient() {
       item.deskripsi.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [initialData, searchTerm]);
+
+  const totalSelisihNilai = useMemo(() => {
+    return filteredData.reduce((total, item) => {
+      const selisihQty = (item.qty_baik + item.qty_rusak) - item.available_qty;
+      if (selisihQty !== 0) {
+        return total + (item.total_harga * selisihQty);
+      }
+      return total;
+    }, 0);
+  }, [filteredData]);
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedData = useMemo(() => {
@@ -445,7 +456,21 @@ export default function ReportStockClient() {
         </div>
       </PageHeader>
 
-      <div className="p-4 md:p-6">
+      <div className="p-4 md:p-6 space-y-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Nilai Selisih Stok</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className={`text-2xl font-bold ${totalSelisihNilai < 0 ? 'text-destructive' : ''}`}>
+              {isLoading ? <Skeleton className="h-8 w-48" /> : formatCurrency(totalSelisihNilai)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Total nilai dari selisih antara stok fisik dan stok tersedia.
+            </p>
+          </CardContent>
+        </Card>
+        
         <div className="border rounded-lg">
           <Table>
             <TableHeader>
