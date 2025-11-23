@@ -67,7 +67,6 @@ export default function ProfileClient() {
   const { user: authUser, isLoading: isAuthLoading, refetch: refetchUser } = useUser();
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [croppedImage, setCroppedImage] = useState<string | null>(null);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -112,20 +111,11 @@ export default function ProfileClient() {
   }, []);
 
   const handleCropAndSave = useCallback(async () => {
-    if (!imageSrc || !croppedAreaPixels || !authUser || !firebaseApp) {
+    if (!imageSrc || !croppedAreaPixels || !authUser || !firebaseApp || !userDocRef) {
         toast({
             variant: "destructive",
             title: "Gagal Menyimpan",
             description: "Informasi gambar atau pengguna tidak lengkap. Coba lagi.",
-        });
-        return;
-    }
-
-    if (!userDocRef) {
-        toast({
-            variant: "destructive",
-            title: "Gagal Menyimpan",
-            description: "Referensi dokumen pengguna tidak ditemukan.",
         });
         return;
     }
@@ -246,11 +236,6 @@ export default function ProfileClient() {
                 </div>
             )}
           </CardContent>
-          <CardFooter>
-            <Button onClick={handleAvatarClick} disabled={isUploading} className="w-full">
-              {isUploading ? "Menyimpan..." : "Ubah Foto"}
-            </Button>
-          </CardFooter>
         </Card>
 
         <Card>

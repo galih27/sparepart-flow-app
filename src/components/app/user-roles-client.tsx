@@ -393,7 +393,7 @@ export default function UserRolesClient() {
                   <TableRow key={user.id}>
                     <TableCell>
                       <Avatar>
-                        <AvatarImage src={user.photo || `https://picsum.photos/seed/${user.id}/200/200`} alt={user.nama_teknisi} />
+                        <AvatarImage src={user.photo} alt={user.nama_teknisi} />
                         <AvatarFallback>
                           <UserCircle className="h-5 w-5" />
                         </AvatarFallback>
@@ -599,5 +599,3 @@ export default function UserRolesClient() {
     </>
   );
 }
-
-    
