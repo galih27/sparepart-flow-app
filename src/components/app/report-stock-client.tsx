@@ -87,11 +87,11 @@ const ITEMS_PER_PAGE = 10;
 // Helper function to parse numbers from Excel more reliably
 const parseNumber = (value: any): number => {
   if (typeof value === 'number') {
-    return value;
+    return isFinite(value) ? value : 0;
   }
   if (typeof value === 'string') {
     const parsed = parseFloat(value.replace(/[^0-9.-]+/g, ''));
-    return isNaN(parsed) ? 0 : parsed;
+    return isNaN(parsed) || !isFinite(parsed) ? 0 : parsed;
   }
   return 0;
 };
@@ -157,7 +157,7 @@ export default function ReportStockClient() {
 
   const totalSelisihNilai = useMemo(() => {
     return filteredData.reduce((total, item) => {
-      const selisihQty = (item.qty_baik + item.qty_rusak) - item.available_qty;
+      const selisihQty = item.qty_real - item.available_qty;
       if (selisihQty !== 0) {
         return total + (item.total_harga * selisihQty);
       }
@@ -265,47 +265,59 @@ export default function ReportStockClient() {
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const json = XLSX.utils.sheet_to_json<any>(worksheet);
+        // Use sheet_to_json with header: 1 to get an array of arrays
+        const json = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
 
         if (!firestore) {
             throw new Error("Koneksi Firestore tidak tersedia.");
         }
 
-        if (json.length > 0 && !json[0].hasOwnProperty('part')) {
-            throw new Error("Format file Excel tidak sesuai. Pastikan ada kolom 'part'.");
+        // Skip the header row by starting from index 1
+        const dataRows = json.slice(1);
+        if (dataRows.length === 0) {
+            throw new Error("File Excel tidak berisi data.");
         }
-
+        
         const batch = writeBatch(firestore);
-        json.forEach((row) => {
+        dataRows.forEach((row, index) => {
+          if (!row[0]) return; // Skip empty rows where the first column (part) is empty
+
           const docRef = doc(collection(firestore, "inventory"));
-          const qty_baik = parseNumber(row.qty_baik);
-          const qty_rusak = parseNumber(row.qty_rusak);
-          const harga_dpp = parseNumber(row.harga_dpp);
-          const ppn = parseNumber(row.ppn);
-          const total_harga = parseNumber(row.total_harga) || (harga_dpp + ppn);
+          
+          const qty_baik = parseNumber(row[6]); // Column G
+          const qty_rusak = parseNumber(row[7]); // Column H
+          const harga_dpp = parseNumber(row[2]); // Column C
+          const ppn = parseNumber(row[3]); // Column D
+          const total_harga = parseNumber(row[4]) || (harga_dpp + ppn); // Column E, fallback to calculation
 
           const inventoryItem: Omit<InventoryItem, 'id'> = {
-            part: String(row.part || ''),
-            deskripsi: String(row.deskripsi || ''),
+            part: String(row[0] || ''), // Column A
+            deskripsi: String(row[1] || ''), // Column B
             harga_dpp: harga_dpp,
             ppn: ppn,
             total_harga: total_harga,
-            satuan: String(row.satuan || 'pcs'),
-            available_qty: qty_baik,
+            satuan: String(row[5] || 'pcs'), // Column F
+            available_qty: qty_baik, // Available is same as good qty on initial import
             qty_baik: qty_baik,
             qty_rusak: qty_rusak,
-            lokasi: String(row.lokasi || ''),
-            return_to_factory: parseNumber(row.return_to_factory),
+            lokasi: String(row[8] || ''), // Column I
+            return_to_factory: parseNumber(row[9]), // Column J
             qty_real: qty_baik + qty_rusak,
           };
           batch.set(docRef, inventoryItem);
         });
 
         await batch.commit();
-        toast({ title: "Sukses", description: `${json.length} data inventaris berhasil diimpor.` });
+        toast({ title: "Sukses", description: `${dataRows.length} data inventaris berhasil diimpor.` });
         await refetch();
 
       } catch (error: any) {
+        console.error("Error importing Excel:", error);
+        toast({
+          variant: "destructive",
+          title: "Gagal Impor",
+          description: error.message || "Terjadi kesalahan saat memproses file.",
+        });
         const permissionError = new FirestorePermissionError({
           path: 'inventory',
           operation: 'create',
@@ -482,7 +494,7 @@ export default function ReportStockClient() {
               {isLoading ? <Skeleton className="h-8 w-48" /> : formatCurrency(totalSelisihNilai)}
             </div>
             <p className="text-xs text-muted-foreground">
-              Total nilai dari selisih antara stok fisik dan stok tersedia.
+              Total nilai dari selisih antara stok fisik (real) dan stok tersedia.
             </p>
           </CardContent>
         </Card>
@@ -525,7 +537,7 @@ export default function ReportStockClient() {
                 </TableRow>
               ) : (
                 paginatedData.map(item => {
-                  const selisihQty = (item.qty_baik + item.qty_rusak) - item.available_qty;
+                  const selisihQty = item.qty_real - item.available_qty;
                   const nilaiSelisih = item.total_harga * selisihQty;
                   return (
                     <TableRow key={item.id}>
@@ -543,7 +555,7 @@ export default function ReportStockClient() {
                       <TableCell>{item.qty_baik}</TableCell>
                       <TableCell>{item.qty_rusak}</TableCell>
                       <TableCell>{item.lokasi}</TableCell>
-                      <TableCell>{formatCurrency(nilaiSelisih)}</TableCell>
+                      <TableCell className={selisihQty !== 0 ? 'text-destructive' : ''}>{formatCurrency(nilaiSelisih)}</TableCell>
                     </TableRow>
                   )
                 })
@@ -754,3 +766,6 @@ export default function ReportStockClient() {
     </>
   );
 }
+
+
+    
