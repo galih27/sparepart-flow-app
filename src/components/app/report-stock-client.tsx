@@ -80,6 +80,7 @@ const editSchema = z.object({
   qty_baik: z.coerce.number().min(0, "Kuantitas tidak boleh negatif"),
   qty_rusak: z.coerce.number().min(0, "Kuantitas tidak boleh negatif"),
   lokasi: z.string().min(1, "Lokasi tidak boleh kosong"),
+  return_to_factory: z.string().optional(),
 });
 
 const ITEMS_PER_PAGE = 10;
@@ -180,6 +181,7 @@ export default function ReportStockClient() {
       qty_baik: item.qty_baik, 
       qty_rusak: item.qty_rusak,
       lokasi: item.lokasi,
+      return_to_factory: item.return_to_factory || "",
      });
     setIsModalOpen(true);
   };
@@ -296,9 +298,8 @@ export default function ReportStockClient() {
           if (!part) return;
 
           const existingItem = existingInventoryMap.get(part.toLowerCase());
-
+          
           const qty_baik = parseNumber(row[6]);
-          const qty_rusak = parseNumber(row[7]);
           const selisihQty = existingItem ? (qty_baik - existingItem.qty_baik) : 0;
 
 
@@ -313,10 +314,10 @@ export default function ReportStockClient() {
                 total_harga: parseNumber(row[4] || existingItem.total_harga),
                 satuan: String(row[5] || existingItem.satuan),
                 qty_baik: qty_baik,
-                qty_rusak: qty_rusak,
+                qty_rusak: parseNumber(row[7]),
                 lokasi: String(row[8] || existingItem.lokasi),
                 return_to_factory: String(row[9] || existingItem.return_to_factory),
-                qty_real: qty_baik + qty_rusak,
+                qty_real: qty_baik + parseNumber(row[7]),
                 available_qty: existingItem.available_qty + selisihQty
             };
             batch.update(docRef, updateData);
@@ -324,6 +325,7 @@ export default function ReportStockClient() {
           } else {
             // Item doesn't exist, create it
             const docRef = doc(collection(firestore, "inventory"));
+            const qty_rusak_new = parseNumber(row[7]);
             const newItemData: Omit<InventoryItem, 'id'> = {
               part: part,
               deskripsi: String(row[1] || ''),
@@ -332,11 +334,11 @@ export default function ReportStockClient() {
               total_harga: parseNumber(row[4]),
               satuan: String(row[5] || 'pcs'),
               qty_baik: qty_baik,
-              qty_rusak: qty_rusak,
+              qty_rusak: qty_rusak_new,
               lokasi: String(row[8] || ''),
               return_to_factory: String(row[9] || ''),
-              qty_real: qty_baik + qty_rusak,
-              available_qty: qty_baik, // For new items, available_qty equals qty_baik
+              qty_real: qty_baik + qty_rusak_new,
+              available_qty: qty_baik,
             };
             batch.set(docRef, newItemData);
             newCount++;
@@ -400,6 +402,7 @@ export default function ReportStockClient() {
 
     const updatedData = {
       ...values,
+      return_to_factory: values.return_to_factory || "",
       qty_real: values.qty_baik + values.qty_rusak,
       available_qty: selectedItem.available_qty + selisihQty,
     };
@@ -543,16 +546,16 @@ export default function ReportStockClient() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Action</TableHead>
-                <TableHead>Part</TableHead>
+                <TableHead className="w-[50px]">Action</TableHead>
+                <TableHead className="w-[120px]">Part</TableHead>
                 <TableHead>Deskripsi</TableHead>
-                <TableHead>Total Harga</TableHead>
-                <TableHead>Available Qty</TableHead>
-                <TableHead>Qty Baik</TableHead>
-                <TableHead>Qty Rusak</TableHead>
-                <TableHead>Lokasi</TableHead>
-                <TableHead>Return to Factory</TableHead>
-                <TableHead>Nilai Selisih</TableHead>
+                <TableHead className="w-[120px]">Total Harga</TableHead>
+                <TableHead className="w-[100px]">Available Qty</TableHead>
+                <TableHead className="w-[100px]">Qty Baik</TableHead>
+                <TableHead className="w-[100px]">Qty Rusak</TableHead>
+                <TableHead className="w-[100px]">Lokasi</TableHead>
+                <TableHead className="w-[120px]">Return to Factory</TableHead>
+                <TableHead className="w-[120px]">Nilai Selisih</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -560,15 +563,15 @@ export default function ReportStockClient() {
                 Array.from({ length: 5 }).map((_, index) => (
                   <TableRow key={index}>
                     <TableCell><Skeleton className="h-8 w-8" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-[200px]" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
                   </TableRow>
                 ))
               ) : paginatedData.length === 0 ? (
@@ -590,8 +593,8 @@ export default function ReportStockClient() {
                           </Button>
                         </div>
                       </TableCell>
-                      <TableCell>{item.part}</TableCell>
-                      <TableCell>{item.deskripsi}</TableCell>
+                      <TableCell className="font-medium">{item.part}</TableCell>
+                      <TableCell><span className="block w-40 truncate">{item.deskripsi}</span></TableCell>
                       <TableCell>{formatCurrency(item.total_harga)}</TableCell>
                       <TableCell>{item.available_qty}</TableCell>
                       <TableCell>{item.qty_baik}</TableCell>
@@ -750,6 +753,19 @@ export default function ReportStockClient() {
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={editForm.control}
+                    name="return_to_factory"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Return to Factory</FormLabel>
+                        <FormControl>
+                          <Input {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                   <DialogFooter>
                     <Button type="button" variant="secondary" onClick={() => setIsEditing(false)}>Batal</Button>
                     <Button type="submit">Simpan Perubahan</Button>
@@ -809,5 +825,3 @@ export default function ReportStockClient() {
     </>
   );
 }
-
-    

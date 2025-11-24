@@ -118,5 +118,3 @@ export type Sob = {
   id?: string;
   name: string;
 };
-
-    
