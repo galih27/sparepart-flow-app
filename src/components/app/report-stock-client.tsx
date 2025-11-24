@@ -84,6 +84,19 @@ const editSchema = z.object({
 
 const ITEMS_PER_PAGE = 10;
 
+// Helper function to parse numbers from Excel more reliably
+const parseNumber = (value: any): number => {
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value.replace(/[^0-9.-]+/g, ''));
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+
 export default function ReportStockClient() {
   const { toast } = useToast();
   const firestore = useFirestore();
@@ -265,21 +278,24 @@ export default function ReportStockClient() {
         const batch = writeBatch(firestore);
         json.forEach((row) => {
           const docRef = doc(collection(firestore, "inventory"));
-          const qty_baik = Number(row.qty_baik) || 0;
-          const qty_rusak = Number(row.qty_rusak) || 0;
+          const qty_baik = parseNumber(row.qty_baik);
+          const qty_rusak = parseNumber(row.qty_rusak);
+          const harga_dpp = parseNumber(row.harga_dpp);
+          const ppn = parseNumber(row.ppn);
+          const total_harga = parseNumber(row.total_harga) || (harga_dpp + ppn);
 
           const inventoryItem: Omit<InventoryItem, 'id'> = {
-            part: row.part || '',
-            deskripsi: row.deskripsi || '',
-            harga_dpp: Number(row.harga_dpp) || 0,
-            ppn: Number(row.ppn) || 0,
-            total_harga: Number(row.total_harga) || 0,
-            satuan: row.satuan || 'pcs',
+            part: String(row.part || ''),
+            deskripsi: String(row.deskripsi || ''),
+            harga_dpp: harga_dpp,
+            ppn: ppn,
+            total_harga: total_harga,
+            satuan: String(row.satuan || 'pcs'),
             available_qty: qty_baik,
             qty_baik: qty_baik,
             qty_rusak: qty_rusak,
-            lokasi: row.lokasi || '',
-            return_to_factory: Number(row.return_to_factory) || 0,
+            lokasi: String(row.lokasi || ''),
+            return_to_factory: parseNumber(row.return_to_factory),
             qty_real: qty_baik + qty_rusak,
           };
           batch.set(docRef, inventoryItem);
