@@ -300,12 +300,14 @@ export default function ReportStockClient() {
 
           const existingItem = existingInventoryMap.get(part.toLowerCase());
           
-          const qty_baik_excel = parseNumber(row[6]);
+          const qty_baik_excel = parseNumber(row[7]);
+          const qty_rusak_excel = parseNumber(row[8]);
+          const selisihQty = qty_baik_excel - (existingItem?.qty_baik || 0);
+
 
           if (existingItem?.id) {
             // Item exists, update it
             const docRef = doc(firestore, "inventory", existingItem.id);
-            const selisihQty = qty_baik_excel - existingItem.qty_baik;
             
             const updateData: Partial<InventoryItem> = {
                 deskripsi: String(row[1] || existingItem.deskripsi),
@@ -314,10 +316,10 @@ export default function ReportStockClient() {
                 total_harga: parseNumber(row[4] || existingItem.total_harga),
                 satuan: String(row[5] || existingItem.satuan),
                 qty_baik: qty_baik_excel,
-                qty_rusak: parseNumber(row[7]),
-                lokasi: String(row[8] || existingItem.lokasi),
-                return_to_factory: String(row[9] || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO',
-                qty_real: qty_baik_excel + parseNumber(row[7]),
+                qty_rusak: qty_rusak_excel,
+                lokasi: String(row[9] || existingItem.lokasi),
+                return_to_factory: String(row[10] || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO',
+                qty_real: qty_baik_excel + qty_rusak_excel,
                 available_qty: (existingItem.available_qty || 0) + selisihQty
             };
             batch.update(docRef, updateData);
@@ -325,7 +327,6 @@ export default function ReportStockClient() {
           } else {
             // Item doesn't exist, create it
             const docRef = doc(collection(firestore, "inventory"));
-            const qty_rusak_new = parseNumber(row[7]);
             const newItemData: Omit<InventoryItem, 'id'> = {
               part: part,
               deskripsi: String(row[1] || ''),
@@ -334,11 +335,11 @@ export default function ReportStockClient() {
               total_harga: parseNumber(row[4]),
               satuan: String(row[5] || 'pcs'),
               qty_baik: qty_baik_excel,
-              qty_rusak: qty_rusak_new,
-              lokasi: String(row[8] || ''),
-              return_to_factory: String(row[9] || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO',
-              qty_real: qty_baik_excel + qty_rusak_new,
-              available_qty: qty_baik_excel,
+              qty_rusak: qty_rusak_excel,
+              lokasi: String(row[9] || ''),
+              return_to_factory: String(row[10] || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO',
+              qty_real: qty_baik_excel + qty_rusak_excel,
+              available_qty: qty_baik_excel, // For new items, available is same as good
             };
             batch.set(docRef, newItemData);
             newCount++;
@@ -845,3 +846,5 @@ export default function ReportStockClient() {
     </>
   );
 }
+
+    
