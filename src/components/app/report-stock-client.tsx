@@ -63,6 +63,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from '../ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 const addSchema = z.object({
   part: z.string().min(1, "Part wajib diisi"),
@@ -73,14 +74,14 @@ const addSchema = z.object({
   qty_baik: z.coerce.number().min(0, "Qty Baik tidak boleh negatif"),
   qty_rusak: z.coerce.number().min(0, "Qty Rusak tidak boleh negatif"),
   lokasi: z.string().min(1, "Lokasi wajib diisi"),
-  return_to_factory: z.string().optional(),
+  return_to_factory: z.enum(['YES', 'NO']),
 });
 
 const editSchema = z.object({
   qty_baik: z.coerce.number().min(0, "Kuantitas tidak boleh negatif"),
   qty_rusak: z.coerce.number().min(0, "Kuantitas tidak boleh negatif"),
   lokasi: z.string().min(1, "Lokasi tidak boleh kosong"),
-  return_to_factory: z.string().optional(),
+  return_to_factory: z.enum(['YES', 'NO']),
 });
 
 const ITEMS_PER_PAGE = 10;
@@ -140,7 +141,7 @@ export default function ReportStockClient() {
       qty_baik: 0,
       qty_rusak: 0,
       lokasi: "",
-      return_to_factory: "",
+      return_to_factory: "NO",
     }
   });
 
@@ -181,7 +182,7 @@ export default function ReportStockClient() {
       qty_baik: item.qty_baik, 
       qty_rusak: item.qty_rusak,
       lokasi: item.lokasi,
-      return_to_factory: item.return_to_factory || "",
+      return_to_factory: item.return_to_factory,
      });
     setIsModalOpen(true);
   };
@@ -299,13 +300,12 @@ export default function ReportStockClient() {
 
           const existingItem = existingInventoryMap.get(part.toLowerCase());
           
-          const qty_baik = parseNumber(row[6]);
-          const selisihQty = existingItem ? (qty_baik - existingItem.qty_baik) : 0;
-
+          const qty_baik_excel = parseNumber(row[6]);
 
           if (existingItem?.id) {
             // Item exists, update it
             const docRef = doc(firestore, "inventory", existingItem.id);
+            const selisihQty = qty_baik_excel - existingItem.qty_baik;
             
             const updateData: Partial<InventoryItem> = {
                 deskripsi: String(row[1] || existingItem.deskripsi),
@@ -313,12 +313,12 @@ export default function ReportStockClient() {
                 ppn: parseNumber(row[3] || existingItem.ppn),
                 total_harga: parseNumber(row[4] || existingItem.total_harga),
                 satuan: String(row[5] || existingItem.satuan),
-                qty_baik: qty_baik,
+                qty_baik: qty_baik_excel,
                 qty_rusak: parseNumber(row[7]),
                 lokasi: String(row[8] || existingItem.lokasi),
-                return_to_factory: String(row[9] || existingItem.return_to_factory),
-                qty_real: qty_baik + parseNumber(row[7]),
-                available_qty: existingItem.available_qty + selisihQty
+                return_to_factory: String(row[9] || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO',
+                qty_real: qty_baik_excel + parseNumber(row[7]),
+                available_qty: (existingItem.available_qty || 0) + selisihQty
             };
             batch.update(docRef, updateData);
             updatedCount++;
@@ -333,12 +333,12 @@ export default function ReportStockClient() {
               ppn: parseNumber(row[3]),
               total_harga: parseNumber(row[4]),
               satuan: String(row[5] || 'pcs'),
-              qty_baik: qty_baik,
+              qty_baik: qty_baik_excel,
               qty_rusak: qty_rusak_new,
               lokasi: String(row[8] || ''),
-              return_to_factory: String(row[9] || ''),
-              qty_real: qty_baik + qty_rusak_new,
-              available_qty: qty_baik,
+              return_to_factory: String(row[9] || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO',
+              qty_real: qty_baik_excel + qty_rusak_new,
+              available_qty: qty_baik_excel,
             };
             batch.set(docRef, newItemData);
             newCount++;
@@ -402,7 +402,6 @@ export default function ReportStockClient() {
 
     const updatedData = {
       ...values,
-      return_to_factory: values.return_to_factory || "",
       qty_real: values.qty_baik + values.qty_rusak,
       available_qty: selectedItem.available_qty + selisihQty,
     };
@@ -429,7 +428,6 @@ export default function ReportStockClient() {
 
     const newItem: Omit<InventoryItem, 'id'> = {
       ...values,
-      return_to_factory: values.return_to_factory || '',
       total_harga: values.harga_dpp + values.ppn,
       available_qty: values.qty_baik,
       qty_real: values.qty_baik + values.qty_rusak,
@@ -554,7 +552,7 @@ export default function ReportStockClient() {
                 <TableHead className="w-[100px]">Qty Baik</TableHead>
                 <TableHead className="w-[100px]">Qty Rusak</TableHead>
                 <TableHead className="w-[100px]">Lokasi</TableHead>
-                <TableHead className="w-[120px]">Return to Factory</TableHead>
+                <TableHead className="w-[150px]">Return to Factory</TableHead>
                 <TableHead className="w-[120px]">Nilai Selisih</TableHead>
               </TableRow>
             </TableHeader>
@@ -653,8 +651,22 @@ export default function ReportStockClient() {
               <FormField control={addForm.control} name="satuan" render={({ field }) => (
                   <FormItem><FormLabel>Satuan</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
               )}/>
-               <FormField control={addForm.control} name="return_to_factory" render={({ field }) => (
-                  <FormItem><FormLabel>Return to Factory</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+              <FormField control={addForm.control} name="return_to_factory" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Return to Factory</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pilih status" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="NO">NO</SelectItem>
+                      <SelectItem value="YES">YES</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
               )}/>
               <DialogFooter className="md:col-span-2 sticky bottom-0 bg-background py-4">
                 <DialogClose asChild><Button type="button" variant="secondary">Batal</Button></DialogClose>
@@ -759,9 +771,17 @@ export default function ReportStockClient() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Return to Factory</FormLabel>
-                        <FormControl>
-                          <Input {...field} />
-                        </FormControl>
+                         <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Pilih status" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="NO">NO</SelectItem>
+                            <SelectItem value="YES">YES</SelectItem>
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
