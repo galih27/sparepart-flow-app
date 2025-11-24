@@ -41,34 +41,8 @@ export const useDoc = <T>(ref: DocumentReference<DocumentData> | null) => {
   }, [ref]);
 
   useEffect(() => {
-    if (!ref) {
-      setIsLoading(false);
-      setData(null);
-      return;
-    }
-
-    setIsLoading(true);
-    // Use onSnapshot for real-time updates
-    const unsubscribe = onSnapshot(ref, (doc) => {
-      if (doc.exists()) {
-        setData({ id: doc.id, ...doc.data() } as T);
-      } else {
-        setData(null);
-      }
-      setIsLoading(false);
-    }, async (serverError) => {
-      const permissionError = new FirestorePermissionError({
-        path: ref.path,
-        operation: 'get',
-      } satisfies SecurityRuleContext);
-      errorEmitter.emit('permission-error', permissionError);
-      setIsLoading(false);
-      setData(null);
-    });
-
-    // Clean up the listener when the component unmounts or the reference changes
-    return () => unsubscribe();
-  }, [ref]);
+    fetchData();
+  }, [fetchData]);
 
   return { data, isLoading, refetch: fetchData };
 };
