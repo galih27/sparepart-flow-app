@@ -73,7 +73,7 @@ const addSchema = z.object({
   qty_baik: z.coerce.number().min(0, "Qty Baik tidak boleh negatif"),
   qty_rusak: z.coerce.number().min(0, "Qty Rusak tidak boleh negatif"),
   lokasi: z.string().min(1, "Lokasi wajib diisi"),
-  return_to_factory: z.coerce.number().min(0, "Return tidak boleh negatif"),
+  return_to_factory: z.string().optional(),
 });
 
 const editSchema = z.object({
@@ -139,7 +139,7 @@ export default function ReportStockClient() {
       qty_baik: 0,
       qty_rusak: 0,
       lokasi: "",
-      return_to_factory: 0,
+      return_to_factory: "",
     }
   });
 
@@ -299,11 +299,12 @@ export default function ReportStockClient() {
 
           const qty_baik = parseNumber(row[6]);
           const qty_rusak = parseNumber(row[7]);
+          const selisihQty = existingItem ? (qty_baik - existingItem.qty_baik) : 0;
+
 
           if (existingItem?.id) {
             // Item exists, update it
             const docRef = doc(firestore, "inventory", existingItem.id);
-            const selisihQty = qty_baik - existingItem.qty_baik;
             
             const updateData: Partial<InventoryItem> = {
                 deskripsi: String(row[1] || existingItem.deskripsi),
@@ -314,7 +315,7 @@ export default function ReportStockClient() {
                 qty_baik: qty_baik,
                 qty_rusak: qty_rusak,
                 lokasi: String(row[8] || existingItem.lokasi),
-                return_to_factory: parseNumber(row[9] || existingItem.return_to_factory),
+                return_to_factory: String(row[9] || existingItem.return_to_factory),
                 qty_real: qty_baik + qty_rusak,
                 available_qty: existingItem.available_qty + selisihQty
             };
@@ -333,7 +334,7 @@ export default function ReportStockClient() {
               qty_baik: qty_baik,
               qty_rusak: qty_rusak,
               lokasi: String(row[8] || ''),
-              return_to_factory: parseNumber(row[9]),
+              return_to_factory: String(row[9] || ''),
               qty_real: qty_baik + qty_rusak,
               available_qty: qty_baik, // For new items, available_qty equals qty_baik
             };
@@ -425,6 +426,7 @@ export default function ReportStockClient() {
 
     const newItem: Omit<InventoryItem, 'id'> = {
       ...values,
+      return_to_factory: values.return_to_factory || '',
       total_harga: values.harga_dpp + values.ppn,
       available_qty: values.qty_baik,
       qty_real: values.qty_baik + values.qty_rusak,
@@ -549,6 +551,7 @@ export default function ReportStockClient() {
                 <TableHead>Qty Baik</TableHead>
                 <TableHead>Qty Rusak</TableHead>
                 <TableHead>Lokasi</TableHead>
+                <TableHead>Return to Factory</TableHead>
                 <TableHead>Nilai Selisih</TableHead>
               </TableRow>
             </TableHeader>
@@ -565,11 +568,12 @@ export default function ReportStockClient() {
                     <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
                   </TableRow>
                 ))
               ) : paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center h-24">
+                  <TableCell colSpan={10} className="text-center h-24">
                     Tidak ada data. Klik 'Upload Excel' atau 'Tambah Data' untuk memulai.
                   </TableCell>
                 </TableRow>
@@ -593,6 +597,7 @@ export default function ReportStockClient() {
                       <TableCell>{item.qty_baik}</TableCell>
                       <TableCell>{item.qty_rusak}</TableCell>
                       <TableCell>{item.lokasi}</TableCell>
+                      <TableCell>{item.return_to_factory}</TableCell>
                       <TableCell className={selisihQty !== 0 ? 'text-destructive' : ''}>{formatCurrency(nilaiSelisih)}</TableCell>
                     </TableRow>
                   )
@@ -646,7 +651,7 @@ export default function ReportStockClient() {
                   <FormItem><FormLabel>Satuan</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
               )}/>
                <FormField control={addForm.control} name="return_to_factory" render={({ field }) => (
-                  <FormItem><FormLabel>Return to Factory</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem><FormLabel>Return to Factory</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
               )}/>
               <DialogFooter className="md:col-span-2 sticky bottom-0 bg-background py-4">
                 <DialogClose asChild><Button type="button" variant="secondary">Batal</Button></DialogClose>
@@ -779,7 +784,7 @@ export default function ReportStockClient() {
                 </div>
                 <div className="grid grid-cols-[150px_1fr] items-center gap-4">
                   <span className="text-muted-foreground">Return to Factory</span>
-                  <span>{selectedItem.return_to_factory} {selectedItem.satuan}</span>
+                  <span>{selectedItem.return_to_factory}</span>
                 </div>
                  <div className="grid grid-cols-[150px_1fr] items-center gap-4">
                   <span className="text-muted-foreground">Lokasi</span>

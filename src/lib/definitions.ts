@@ -45,7 +45,7 @@ export type InventoryItem = {
   qty_baik: number;
   qty_rusak: number;
   lokasi: string;
-  return_to_factory: number;
+  return_to_factory: string;
   qty_real: number;
 };
 
