@@ -90,7 +90,7 @@ const parseNumber = (value: any): number => {
     return isFinite(value) ? value : 0;
   }
   if (typeof value === 'string') {
-    const parsed = parseFloat(value.replace(/[^0-9.-]+/g, ''));
+    const parsed = parseFloat(value.replace(/[^0-9,.-]+/g, '').replace(',', '.'));
     return isNaN(parsed) || !isFinite(parsed) ? 0 : parsed;
   }
   return 0;
@@ -280,7 +280,7 @@ export default function ReportStockClient() {
         
         const batch = writeBatch(firestore);
         dataRows.forEach((row, index) => {
-          if (!row[0]) return; // Skip empty rows where the first column (part) is empty
+          if (!row || row.length === 0 || !row[0]) return; // Skip empty or invalid rows
 
           const docRef = doc(collection(firestore, "inventory"));
           
@@ -297,12 +297,12 @@ export default function ReportStockClient() {
             ppn: ppn,
             total_harga: total_harga,
             satuan: String(row[5] || 'pcs'), // Column F
-            available_qty: qty_baik, // Available is same as good qty on initial import
+            available_qty: qty_baik, // On import, available qty is the same as physical good qty
             qty_baik: qty_baik,
             qty_rusak: qty_rusak,
             lokasi: String(row[8] || ''), // Column I
-            return_to_factory: parseNumber(row[9]), // Column J
-            qty_real: qty_baik + qty_rusak,
+            return_to_factory: parseNumber(row[9] || 0), // Column J
+            qty_real: qty_baik + qty_rusak, // Real physical stock
           };
           batch.set(docRef, inventoryItem);
         });
@@ -766,6 +766,5 @@ export default function ReportStockClient() {
     </>
   );
 }
-
 
     
