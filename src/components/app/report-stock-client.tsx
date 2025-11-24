@@ -105,7 +105,7 @@ export default function ReportStockClient() {
   const { user: authUser, isLoading: isLoadingAuth } = useUser();
 
   const userDocRef = useMemo(() => {
-    if (!firestore || !authUser) return null;
+    if (!firestore || !authUser?.uid) return null;
     return doc(firestore, 'users', authUser.uid);
   }, [firestore, authUser]);
 
@@ -297,7 +297,7 @@ export default function ReportStockClient() {
         dataRows.forEach((row) => {
           if (!row || row.length === 0 || !row[0]) return;
           
-          // Map columns by order
+          // Map columns by order as requested
           const part = String(row[0] || '').trim();
           if (!part) return;
 
@@ -306,7 +306,7 @@ export default function ReportStockClient() {
           const ppn = parseNumber(row[3]);
           const total_harga = parseNumber(row[4]);
           const satuan = String(row[5] || 'pcs');
-          const available_qty = parseNumber(row[6]);
+          const available_qty = parseNumber(row[6]); // This is now the source of truth from Excel
           const qty_baik = parseNumber(row[7]);
           const qty_rusak = parseNumber(row[8]);
           const lokasi = String(row[9] || '');
@@ -326,7 +326,7 @@ export default function ReportStockClient() {
                 ppn: ppn,
                 total_harga: total_harga,
                 satuan: satuan,
-                available_qty: available_qty, // Directly update from Excel
+                available_qty: available_qty, // Overwrite with value from Excel
                 qty_baik: qty_baik,
                 qty_rusak: qty_rusak,
                 lokasi: lokasi,
@@ -345,7 +345,7 @@ export default function ReportStockClient() {
               ppn: ppn,
               total_harga: total_harga,
               satuan: satuan,
-              available_qty: available_qty, // Directly set from Excel for new item
+              available_qty: available_qty, // Set from Excel for new item
               qty_baik: qty_baik,
               qty_rusak: qty_rusak,
               lokasi: lokasi,

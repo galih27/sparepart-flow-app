@@ -46,7 +46,7 @@ function SidebarNavContent() {
   const firestore = useFirestore();
 
   const userDocRef = useMemo(() => {
-    if (!firestore || !authUser) return null;
+    if (!firestore || !authUser?.uid) return null;
     return doc(firestore, 'users', authUser.uid);
   }, [firestore, authUser]);
 

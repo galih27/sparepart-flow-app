@@ -82,7 +82,7 @@ export default function BonPdsClient() {
   const { user: authUser, isLoading: isLoadingAuth } = useUser();
 
   const userDocRef = useMemo(() => {
-    if (!firestore || !authUser) return null;
+    if (!firestore || !authUser?.uid) return null;
     return doc(firestore, 'users', authUser.uid);
   }, [firestore, authUser]);
 
