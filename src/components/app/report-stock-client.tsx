@@ -158,6 +158,7 @@ export default function ReportStockClient() {
   }, [initialData, searchTerm]);
 
   const totalSelisihNilai = useMemo(() => {
+    if (!filteredData) return 0;
     return filteredData.reduce((total, item) => {
       const selisihQty = item.qty_real - item.available_qty;
       if (selisihQty !== 0) {
@@ -166,6 +167,7 @@ export default function ReportStockClient() {
       return total;
     }, 0);
   }, [filteredData]);
+
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedData = useMemo(() => {
@@ -182,7 +184,7 @@ export default function ReportStockClient() {
       qty_baik: item.qty_baik, 
       qty_rusak: item.qty_rusak,
       lokasi: item.lokasi,
-      return_to_factory: item.return_to_factory,
+      return_to_factory: item.return_to_factory === 'YES' ? 'YES' : 'NO',
      });
     setIsModalOpen(true);
   };
@@ -285,7 +287,7 @@ export default function ReportStockClient() {
         const existingInventoryMap = new Map<string, InventoryItem>();
         existingInventorySnapshot.forEach(doc => {
             const item = { id: doc.id, ...doc.data() } as InventoryItem;
-            existingInventoryMap.set(item.part.toLowerCase(), item);
+            existingInventoryMap.set(String(item.part).toLowerCase(), item);
         });
 
         const batch = writeBatch(firestore);
@@ -294,33 +296,42 @@ export default function ReportStockClient() {
 
         dataRows.forEach((row) => {
           if (!row || row.length === 0 || !row[0]) return;
-
+          
+          // Map columns by order
           const part = String(row[0] || '').trim();
           if (!part) return;
 
+          const deskripsi = String(row[1] || '');
+          const harga_dpp = parseNumber(row[2]);
+          const ppn = parseNumber(row[3]);
+          const total_harga = parseNumber(row[4]);
+          const satuan = String(row[5] || 'pcs');
+          const available_qty = parseNumber(row[6]);
+          const qty_baik = parseNumber(row[7]);
+          const qty_rusak = parseNumber(row[8]);
+          const lokasi = String(row[9] || '');
+          const return_to_factory_raw = String(row[10] || 'NO').toUpperCase();
+          const return_to_factory = return_to_factory_raw === 'YES' ? 'YES' : 'NO';
+          const qty_real = qty_baik + qty_rusak;
+
+
           const existingItem = existingInventoryMap.get(part.toLowerCase());
           
-          const qty_baik_excel = parseNumber(row[7]);
-          const qty_rusak_excel = parseNumber(row[8]);
-          const selisihQty = qty_baik_excel - (existingItem?.qty_baik || 0);
-
-
           if (existingItem?.id) {
             // Item exists, update it
             const docRef = doc(firestore, "inventory", existingItem.id);
-            
             const updateData: Partial<InventoryItem> = {
-                deskripsi: String(row[1] || existingItem.deskripsi),
-                harga_dpp: parseNumber(row[2] || existingItem.harga_dpp),
-                ppn: parseNumber(row[3] || existingItem.ppn),
-                total_harga: parseNumber(row[4] || existingItem.total_harga),
-                satuan: String(row[5] || existingItem.satuan),
-                qty_baik: qty_baik_excel,
-                qty_rusak: qty_rusak_excel,
-                lokasi: String(row[9] || existingItem.lokasi),
-                return_to_factory: String(row[10] || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO',
-                qty_real: qty_baik_excel + qty_rusak_excel,
-                available_qty: (existingItem.available_qty || 0) + selisihQty
+                deskripsi: deskripsi,
+                harga_dpp: harga_dpp,
+                ppn: ppn,
+                total_harga: total_harga,
+                satuan: satuan,
+                available_qty: available_qty, // Directly update from Excel
+                qty_baik: qty_baik,
+                qty_rusak: qty_rusak,
+                lokasi: lokasi,
+                return_to_factory: return_to_factory,
+                qty_real: qty_real,
             };
             batch.update(docRef, updateData);
             updatedCount++;
@@ -329,17 +340,17 @@ export default function ReportStockClient() {
             const docRef = doc(collection(firestore, "inventory"));
             const newItemData: Omit<InventoryItem, 'id'> = {
               part: part,
-              deskripsi: String(row[1] || ''),
-              harga_dpp: parseNumber(row[2]),
-              ppn: parseNumber(row[3]),
-              total_harga: parseNumber(row[4]),
-              satuan: String(row[5] || 'pcs'),
-              qty_baik: qty_baik_excel,
-              qty_rusak: qty_rusak_excel,
-              lokasi: String(row[9] || ''),
-              return_to_factory: String(row[10] || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO',
-              qty_real: qty_baik_excel + qty_rusak_excel,
-              available_qty: qty_baik_excel, // For new items, available is same as good
+              deskripsi: deskripsi,
+              harga_dpp: harga_dpp,
+              ppn: ppn,
+              total_harga: total_harga,
+              satuan: satuan,
+              available_qty: available_qty, // Directly set from Excel for new item
+              qty_baik: qty_baik,
+              qty_rusak: qty_rusak,
+              lokasi: lokasi,
+              return_to_factory: return_to_factory,
+              qty_real: qty_real,
             };
             batch.set(docRef, newItemData);
             newCount++;
