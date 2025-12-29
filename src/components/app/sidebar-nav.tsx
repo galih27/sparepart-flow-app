@@ -4,11 +4,12 @@
 import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useMemo } from "react";
 import Link from "next/link";
-import { doc } from "firebase/firestore";
-import { useDoc, useFirestore, useUser } from "@/firebase";
+import { useCurrentUser, useAPIDoc } from "@/hooks/use-api";
 import type { User } from "@/lib/definitions";
 import {
   SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
@@ -28,7 +29,7 @@ import {
 } from "lucide-react";
 
 const allMenuItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard, permission: 'dashboard_view' },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, permission: 'dashboard_view' },
   { href: "/report-stock", label: "Report Stock", icon: Warehouse, permission: 'reportstock_view' },
   { href: "/daily-bon", label: "Daily Bon", icon: Truck, permission: 'dailybon_view' },
   { href: "/bon-pds", label: "Bon PDS", icon: ArrowRightLeft, permission: 'bonpds_view' },
@@ -42,50 +43,59 @@ const allMenuItems = [
 
 function SidebarNavContent() {
   const pathname = usePathname();
-  const { user: authUser, isLoading: isLoadingUser } = useUser();
-  const firestore = useFirestore();
-
-  const userDocRef = useMemo(() => {
-    if (!firestore || !authUser?.uid) return null;
-    return doc(firestore, 'users', authUser.uid);
-  }, [firestore, authUser]);
-
-  const { data: currentUser, isLoading: isLoadingRole } = useDoc<User>(userDocRef);
-
-  const isLoading = isLoadingUser || isLoadingRole;
-  const permissions = currentUser?.permissions;
+  const { user: authUser, isLoading } = useCurrentUser();
+  const permissions = authUser?.permissions;
 
   const menuItems = useMemo(() => {
     if (isLoading || !permissions) return [];
+
+    // Ensure permissions is an object
+    const perms = typeof permissions === 'string' ? JSON.parse(permissions) : permissions;
+
+    if (!perms) return [];
+
     // Re-order SOB to be after MSK
+    const order = ['/dashboard', '/report-stock', '/daily-bon', '/bon-pds', '/msk', '/sob', '/nr', '/tsn', '/tsp', '/user-roles'];
     const sortedItems = [...allMenuItems].sort((a, b) => {
-      const order = ['/', '/report-stock', '/daily-bon', '/bon-pds', '/msk', '/sob', '/nr', '/tsn', '/tsp', '/user-roles'];
       return order.indexOf(a.href) - order.indexOf(b.href);
     });
-    return sortedItems.filter(item => permissions[item.permission]);
+
+    return sortedItems.filter(item => {
+      // Dashboard is usually visible to all authenticated users
+      if (item.href === '/dashboard') return true;
+      return perms[item.permission] === true || perms[item.permission] === 1;
+    });
   }, [permissions, isLoading]);
 
   return (
     <SidebarContent>
-      <SidebarMenu>
-        {isLoading ? (
-           Array.from({ length: 10 }).map((_, index) => <SidebarMenuSkeleton key={index} showIcon />)
-        ) : (
-          menuItems.map((item) => (
-            <SidebarMenuItem key={item.href}>
-              <Link href={item.href} passHref>
-                <SidebarMenuButton
-                  isActive={pathname.startsWith(item.href) && (item.href === '/' ? pathname === '/' : true)}
-                  tooltip={item.label}
-                >
-                  <item.icon />
-                  <span>{item.label}</span>
-                </SidebarMenuButton>
-              </Link>
-            </SidebarMenuItem>
-          ))
-        )}
-      </SidebarMenu>
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {isLoading ? (
+              Array.from({ length: 8 }).map((_, index) => <SidebarMenuSkeleton key={index} showIcon />)
+            ) : menuItems.length > 0 ? (
+              menuItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <Link href={item.href} passHref legacyBehavior={false}>
+                    <SidebarMenuButton
+                      isActive={pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))}
+                      tooltip={item.label}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </Link>
+                </SidebarMenuItem>
+              ))
+            ) : (
+              <div className="px-4 py-8 text-center text-xs text-muted-foreground italic">
+                Menu tidak tersedia
+              </div>
+            )}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
     </SidebarContent>
   );
 }

@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
@@ -6,12 +5,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import * as z from "zod";
 import { Plus, Pencil, Eye, Trash2 } from 'lucide-react';
-import type { DailyBon, User, InventoryItem } from '@/lib/definitions';
+import type { DailyBon, User, InventoryItem, Permissions } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
-import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc, runTransaction, query, where, getDocs } from 'firebase/firestore';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
+import { useAPIFetch, useCurrentUser, api } from '@/hooks/use-api';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -61,14 +57,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
 import { Skeleton } from '../ui/skeleton';
 
 const addSchema = z.object({
   part: z.string().min(1, "Part wajib diisi"),
   deskripsi: z.string(),
   qty_dailybon: z.coerce.number().min(1, "Kuantitas harus lebih dari 0"),
-  harga: z.number(),
+  harga: z.coerce.number(),
   status_bon: z.enum(["BON", "RECEIVED", "KMP", "CANCELED"]),
   teknisi: z.string().min(1, "Teknisi wajib diisi"),
   keterangan: z.string().optional(),
@@ -79,37 +74,25 @@ const editSchema = z.object({
   no_tkl: z.string().optional(),
   keterangan: z.string().optional(),
 }).refine((data) => {
-    if ((data.status_bon === 'RECEIVED' || data.status_bon === 'KMP') && (!data.no_tkl || data.no_tkl.trim() === '')) {
-      return false;
-    }
-    return true;
-  }, {
-    message: "No. TKL wajib diisi untuk status RECEIVED atau KMP.",
-    path: ['no_tkl'],
-  });
+  if ((data.status_bon === 'RECEIVED' || data.status_bon === 'KMP') && (!data.no_tkl || data.no_tkl.trim() === '')) {
+    return false;
+  }
+  return true;
+}, {
+  message: "No. TKL wajib diisi untuk status RECEIVED atau KMP.",
+  path: ['no_tkl'],
+});
 
 const ITEMS_PER_PAGE = 10;
 
 export default function DailyBonClient() {
   const { toast } = useToast();
-  const firestore = useFirestore();
-  const { user: authUser, isLoading: isLoadingAuth } = useUser();
+  const { user: authUser, isLoading: isLoadingAuth } = useCurrentUser();
 
-  const userDocRef = useMemo(() => {
-    if (!firestore || !authUser?.uid) return null;
-    return doc(firestore, 'users', authUser.uid);
-  }, [firestore, authUser]);
+  const { data, isLoading: isLoadingData, refetch } = useAPIFetch<DailyBon>('/api/daily-bon');
+  const { data: users, isLoading: isLoadingUsers } = useAPIFetch<User>('/api/users');
+  const { data: inventory, isLoading: isLoadingInventory } = useAPIFetch<InventoryItem>('/api/inventory');
 
-  const { data: currentUser, isLoading: isLoadingUser } = useDoc<User>(userDocRef);
-
-  const bonQuery = useMemo(() => firestore ? collection(firestore, 'daily_bon') : null, [firestore]);
-  const usersQuery = useMemo(() => firestore ? collection(firestore, 'users') : null, [firestore]);
-  const inventoryQuery = useMemo(() => firestore ? collection(firestore, 'inventory') : null, [firestore]);
-  
-  const { data, isLoading: isLoadingData } = useCollection<DailyBon>(bonQuery);
-  const { data: users, isLoading: isLoadingUsers } = useCollection<User>(usersQuery);
-  const { data: inventory, isLoading: isLoadingInventory } = useCollection<InventoryItem>(inventoryQuery);
-  
   const [filterTeknisi, setFilterTeknisi] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -139,7 +122,7 @@ export default function DailyBonClient() {
   const watchedPart = useWatch({ control: addForm.control, name: "part" });
 
   useEffect(() => {
-    if (inventory) {
+    if (inventory && watchedPart) {
       const inventoryItem = inventory.find(item => item.part.toLowerCase() === watchedPart.toLowerCase());
       if (inventoryItem) {
         addForm.setValue("deskripsi", inventoryItem.deskripsi);
@@ -152,29 +135,42 @@ export default function DailyBonClient() {
   }, [watchedPart, inventory, addForm]);
 
   useEffect(() => {
-    if (currentUser?.role === 'Teknisi') {
-      addForm.setValue('teknisi', currentUser.nama_teknisi);
+    if (authUser && authUser.role === 'Teknisi') {
+      addForm.setValue('teknisi', authUser.nama_teknisi);
     }
-  }, [currentUser, addForm, isAddModalOpen]);
+  }, [authUser, addForm, isAddModalOpen]);
 
+  const parsePermissions = (perms: any): Permissions | null => {
+    if (!perms) return null;
+    if (typeof perms === 'string') {
+      try {
+        return JSON.parse(perms);
+      } catch (e) {
+        return null;
+      }
+    }
+    return perms;
+  };
+
+  const permissions = useMemo(() => parsePermissions(authUser?.permissions), [authUser]);
 
   const filteredData = useMemo(() => {
     if (!data) return [];
-    
+
     let bonData = data;
-    
-    if (currentUser?.role === 'Teknisi') {
-        bonData = bonData.filter(item => item.teknisi === currentUser.nama_teknisi);
+
+    if (authUser?.role === 'Teknisi') {
+      bonData = bonData.filter(item => item.teknisi === authUser.nama_teknisi);
     }
 
     return bonData.filter(item =>
       (filterTeknisi === '' || item.teknisi === filterTeknisi) &&
       (filterStatus === '' || item.status_bon === filterStatus)
     ).sort((a, b) => {
-        if (!a.tanggal_dailybon || !b.tanggal_dailybon) return 0;
-        return new Date(b.tanggal_dailybon).getTime() - new Date(a.tanggal_dailybon).getTime()
+      if (!a.tanggal_dailybon || !b.tanggal_dailybon) return 0;
+      return new Date(b.tanggal_dailybon).getTime() - new Date(a.tanggal_dailybon).getTime()
     });
-  }, [data, filterTeknisi, filterStatus, currentUser]);
+  }, [data, filterTeknisi, filterStatus, authUser]);
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedData = useMemo(() => {
@@ -182,76 +178,19 @@ export default function DailyBonClient() {
     const end = start + ITEMS_PER_PAGE;
     return filteredData.slice(start, end);
   }, [filteredData, currentPage]);
-  
+
   async function onAddSubmit(values: z.infer<typeof addSchema>) {
-    if (!firestore) return;
+    const result = await api.post('/api/daily-bon', values);
 
-    try {
-        await runTransaction(firestore, async (transaction) => {
-            const inventoryCol = collection(firestore, 'inventory');
-            const q = query(inventoryCol, where("part", "==", values.part));
-            const inventorySnapshot = await getDocs(q);
-
-            if (inventorySnapshot.empty) {
-                throw new Error(`Part ${values.part} tidak ditemukan di inventaris.`);
-            }
-
-            const inventoryRef = inventorySnapshot.docs[0].ref;
-            const inventoryDoc = await transaction.get(inventoryRef);
-            if (!inventoryDoc.exists()) {
-                throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
-            }
-
-            const currentInventory = inventoryDoc.data() as InventoryItem;
-            const changes: Partial<InventoryItem> = {};
-            let stockUpdatedFlag = false;
-
-            if (values.status_bon === 'BON') {
-                changes.available_qty = currentInventory.available_qty - values.qty_dailybon;
-                if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
-                stockUpdatedFlag = true;
-            } else if (values.status_bon === 'RECEIVED' || values.status_bon === 'KMP') {
-                changes.qty_baik = currentInventory.qty_baik - values.qty_dailybon;
-                changes.available_qty = currentInventory.available_qty - values.qty_dailybon;
-                if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
-                if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
-                stockUpdatedFlag = true;
-            }
-            
-            if (Object.keys(changes).length > 0) {
-              transaction.update(inventoryRef, changes);
-            }
-
-            const newBonRef = doc(collection(firestore, 'daily_bon'));
-            const newBonData: Omit<DailyBon, 'id'> = {
-                part: values.part,
-                deskripsi: values.deskripsi,
-                qty_dailybon: values.qty_dailybon,
-                harga: values.harga,
-                status_bon: values.status_bon,
-                teknisi: values.teknisi,
-                tanggal_dailybon: new Date().toISOString().split('T')[0],
-                no_tkl: '',
-                keterangan: values.keterangan || '',
-                stock_updated: stockUpdatedFlag,
-            };
-            transaction.set(newBonRef, newBonData);
-        });
-
-        toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan dan stok diperbarui." });
-        setIsAddModalOpen(false);
-        addForm.reset();
-    } catch (error: any) {
-        console.error("Gagal menambah bon:", error);
-        toast({ variant: "destructive", title: "Gagal", description: error.message });
-        const permissionError = new FirestorePermissionError({
-          path: 'daily_bon',
-          operation: 'create',
-          requestResourceData: values,
-        } satisfies SecurityRuleContext);
-        errorEmitter.emit('permission-error', permissionError);
+    if (result.error) {
+      toast({ variant: "destructive", title: "Gagal", description: result.error.message });
+    } else {
+      toast({ title: "Sukses", description: "Data bon harian berhasil ditambahkan." });
+      setIsAddModalOpen(false);
+      addForm.reset();
+      await refetch();
     }
-}
+  }
 
   const handleEdit = (bon: DailyBon) => {
     setSelectedBon(bon);
@@ -277,189 +216,41 @@ export default function DailyBonClient() {
     }
   };
 
-  const handleReverseStock = async (bon: DailyBon) => {
-    if (!firestore) return;
-  
-    const inventoryCol = collection(firestore, 'inventory');
-    const q = query(inventoryCol, where("part", "==", bon.part));
-  
-    try {
-      const inventorySnapshot = await getDocs(q);
-      if (inventorySnapshot.empty) {
-        throw new Error(`Part ${bon.part} tidak ditemukan di inventaris.`);
-      }
-      const inventoryRef = inventorySnapshot.docs[0].ref;
-  
-      await runTransaction(firestore, async (transaction) => {
-        const inventoryDoc = await transaction.get(inventoryRef);
-        if (!inventoryDoc.exists()) {
-          throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
-        }
-  
-        const currentInventory = inventoryDoc.data() as InventoryItem;
-        const changes: Partial<InventoryItem> = {};
-  
-        if (bon.status_bon === 'RECEIVED' || bon.status_bon === 'KMP') {
-          // Rollback permanent deduction
-          changes.qty_baik = currentInventory.qty_baik + bon.qty_dailybon;
-          changes.available_qty = currentInventory.available_qty + bon.qty_dailybon;
-        } else if (bon.status_bon === 'BON') {
-          // Rollback temporary deduction
-          changes.available_qty = currentInventory.available_qty + bon.qty_dailybon;
-        }
-  
-        if (Object.keys(changes).length > 0) {
-          transaction.update(inventoryRef, changes);
-        }
-      });
-  
-      toast({ title: "Rollback Sukses", description: `Stok untuk part ${bon.part} berhasil dikembalikan.` });
-    } catch (error: any) {
-      console.error("Gagal melakukan rollback stok:", error);
-      toast({
-        variant: "destructive",
-        title: "Gagal Rollback Stok",
-        description: `Gagal mengembalikan stok untuk part ${bon.part}. Mohon periksa manual. Error: ${error.message}`,
-      });
-      throw error; // Re-throw to be caught by the caller if needed
-    }
-  };
-  
-
   const confirmDelete = async () => {
-    if (!selectedBon || !selectedBon.id || !firestore) return;
-    
-    try {
-        // Reverse stock if it was previously updated
-        if (selectedBon.stock_updated) {
-          await handleReverseStock(selectedBon);
-        }
-    } catch (error) {
-        // Log the error but proceed with deletion as per requirement
-        console.error("Gagal rollback stok saat menghapus, tapi penghapusan dilanjutkan:", error);
+    if (!selectedBon || !selectedBon.id) return;
+
+    const result = await api.delete(`/api/daily-bon/${selectedBon.id}`);
+
+    if (result.error) {
+      toast({ variant: "destructive", title: "Gagal", description: result.error.message });
+    } else {
+      toast({ title: "Sukses", description: "Bon harian telah dihapus." });
+      await refetch();
     }
-  
-    const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
-  
-    deleteDoc(bonRef)
-      .then(() => {
-        toast({ title: "Sukses", description: "Bon harian telah dihapus." });
-      })
-      .catch(async (serverError) => {
-        const permissionError = new FirestorePermissionError({
-          path: bonRef.path,
-          operation: 'delete',
-        } satisfies SecurityRuleContext);
-        errorEmitter.emit('permission-error', permissionError);
-      })
-      .finally(() => {
-        setIsDeleting(false);
-        setSelectedBon(null);
-      });
+
+    setIsDeleting(false);
+    setSelectedBon(null);
   };
-  
-async function onEditSubmit(values: z.infer<typeof editSchema>) {
-    if (!firestore || !selectedBon || !selectedBon.id) return;
 
-    const bonRef = doc(firestore, 'daily_bon', selectedBon.id);
-    const newStatus = values.status_bon;
-    const oldStatus = selectedBon.status_bon;
+  async function onEditSubmit(values: z.infer<typeof editSchema>) {
+    if (!selectedBon || !selectedBon.id) return;
 
-    // If status is unchanged, just update the other fields
-    if (newStatus === oldStatus) {
-        updateDoc(bonRef, values).then(() => {
-            toast({ title: "Informasi", description: "Data bon berhasil diperbarui (tanpa perubahan status)." });
-            setIsEditModalOpen(false);
-        }).catch(err => {
-            console.error("Gagal update non-status:", err);
-            toast({ variant: "destructive", title: "Gagal Update", description: "Gagal memperbarui detail bon." });
-        });
-        return;
+    const result = await api.put(`/api/daily-bon/${selectedBon.id}`, values);
+
+    if (result.error) {
+      toast({ variant: "destructive", title: "Gagal Update", description: result.error.message });
+    } else {
+      toast({ title: "Sukses", description: "Status bon diperbarui." });
+      setIsEditModalOpen(false);
+      setSelectedBon(null);
+      await refetch();
     }
+  }
 
-    try {
-        await runTransaction(firestore, async (transaction) => {
-            const inventoryCol = collection(firestore, 'inventory');
-            const q = query(inventoryCol, where("part", "==", selectedBon.part));
-            const inventorySnapshot = await getDocs(q); 
-            
-            if (inventorySnapshot.empty) {
-                throw new Error(`Part ${selectedBon.part} tidak ditemukan di Report Stock.`);
-            }
-            const inventoryRef = inventorySnapshot.docs[0].ref;
-
-            const inventoryDoc = await transaction.get(inventoryRef);
-            if (!inventoryDoc.exists()) {
-                throw new Error("Dokumen inventaris tidak ditemukan saat transaksi.");
-            }
-            const currentInventory = inventoryDoc.data() as InventoryItem;
-
-            let stockUpdatedFlag = selectedBon.stock_updated ?? false;
-            const bonUpdateData: any = { ...values };
-
-            // SCENARIO 1: CANCELLATION (ROLLBACK)
-            if (newStatus === 'CANCELED' && stockUpdatedFlag) {
-                const changes: Partial<InventoryItem> = {};
-                if (oldStatus === 'BON') {
-                    changes.available_qty = currentInventory.available_qty + selectedBon.qty_dailybon;
-                } else if (oldStatus === 'RECEIVED' || oldStatus === 'KMP') {
-                    changes.qty_baik = currentInventory.qty_baik + selectedBon.qty_dailybon;
-                    changes.available_qty = currentInventory.available_qty + selectedBon.qty_dailybon;
-                }
-                if (Object.keys(changes).length > 0) {
-                  transaction.update(inventoryRef, changes);
-                }
-                stockUpdatedFlag = false;
-            }
-            // SCENARIO 2: UPGRADE FROM BON (TEMP) TO PERMANENT
-            else if (oldStatus === 'BON' && (newStatus === 'RECEIVED' || newStatus === 'KMP') && stockUpdatedFlag) {
-                const changes: Partial<InventoryItem> = {
-                    qty_baik: currentInventory.qty_baik - selectedBon.qty_dailybon
-                };
-                if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi untuk update.");
-                transaction.update(inventoryRef, changes);
-            }
-            // SCENARIO 3: FIRST TIME STOCK DEDUCTION
-            else if (!stockUpdatedFlag) {
-                const changes: Partial<InventoryItem> = {};
-                if (newStatus === 'BON') {
-                    changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
-                    if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
-                } else if (newStatus === 'RECEIVED' || newStatus === 'KMP') {
-                    changes.qty_baik = currentInventory.qty_baik - selectedBon.qty_dailybon;
-                    changes.available_qty = currentInventory.available_qty - selectedBon.qty_dailybon;
-                    if (changes.qty_baik < 0) throw new Error("Stok 'baik' tidak mencukupi.");
-                    if (changes.available_qty < 0) throw new Error("Stok 'available' tidak mencukupi.");
-                }
-                if (Object.keys(changes).length > 0) {
-                    transaction.update(inventoryRef, changes);
-                    stockUpdatedFlag = true;
-                }
-            }
-
-            bonUpdateData.stock_updated = stockUpdatedFlag;
-            transaction.update(bonRef, bonUpdateData);
-        });
-
-        toast({ title: "Sukses", description: "Status bon diperbarui dan stok telah disesuaikan." });
-        setIsEditModalOpen(false);
-        setSelectedBon(null);
-
-    } catch (error: any) {
-        console.error("Gagal onEditSubmit:", error);
-        toast({ variant: "destructive", title: "Gagal Update", description: error.message });
-        const permissionError = new FirestorePermissionError({
-            path: bonRef.path,
-            operation: 'update',
-            requestResourceData: values,
-        } satisfies SecurityRuleContext);
-        errorEmitter.emit('permission-error', permissionError);
-    }
-}
-
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
+  const formatCurrency = (value: number | string) => {
+    const num = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(num)) return 'Rp 0';
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
   }
 
   const statusVariant = {
@@ -469,70 +260,67 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
     'CANCELED': 'destructive'
   } as const;
 
-  const isLoading = isLoadingData || isLoadingUsers || isLoadingInventory || isLoadingAuth || isLoadingUser;
-  const permissions = currentUser?.permissions;
+  const isLoading = isLoadingData || isLoadingUsers || isLoadingInventory || isLoadingAuth;
 
   const renderActionCell = (item: DailyBon) => {
     const isReceivedOrCanceled = item.status_bon === 'RECEIVED' || item.status_bon === 'CANCELED';
-    const canEdit = permissions?.dailybon_edit && (currentUser?.role === 'Admin' || !isReceivedOrCanceled);
-    const canDelete = permissions?.dailybon_delete;
+    const canEdit = permissions?.dailybon_edit && (authUser?.role === 'Admin' || !isReceivedOrCanceled);
 
     return (
-        <div className="flex items-center gap-0">
-            <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-                <Eye className="h-4 w-4" />
-            </Button>
-            {canEdit && (
-                 <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
-                    <Pencil className="h-4 w-4" />
-                </Button>
-            )}
-            {canDelete && (
-                 <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
-                    <Trash2 className="h-4 w-4" />
-                </Button>
-            )}
-        </div>
+      <div className="flex items-center gap-0">
+        <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+          <Eye className="h-4 w-4" />
+        </Button>
+        {canEdit && (
+          <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+        )}
+        {permissions?.dailybon_delete && (
+          <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
     );
   };
-
 
   return (
     <>
       <PageHeader title="Daily Bon">
         <div className="flex items-center gap-2">
-            {currentUser?.role !== 'Teknisi' && (
-              <Select 
-                value={filterTeknisi}
-                onValueChange={(value) => {
-                  setFilterTeknisi(value === 'all' ? '' : value);
-                  setCurrentPage(1);
-                }}
-              >
-                  <SelectTrigger className="w-[180px] bg-background">
-                      <SelectValue placeholder="Filter Teknisi" />
-                  </SelectTrigger>
-                  <SelectContent>
-                      <SelectItem value="all">Semua Teknisi</SelectItem>
-                      {users?.filter(u => u.role === 'Teknisi').map(user => (
-                          <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
-                      ))}
-                  </SelectContent>
-              </Select>
-            )}
-
-            <Select value={filterStatus} onValueChange={(value) => {setFilterStatus(value === 'all' ? '' : value); setCurrentPage(1);}}>
+          {authUser?.role !== 'Teknisi' && (
+            <Select
+              value={filterTeknisi}
+              onValueChange={(value) => {
+                setFilterTeknisi(value === 'all' ? '' : value);
+                setCurrentPage(1);
+              }}
+            >
               <SelectTrigger className="w-[180px] bg-background">
-                  <SelectValue placeholder="Filter Status" />
+                <SelectValue placeholder="Filter Teknisi" />
               </SelectTrigger>
               <SelectContent>
-                  <SelectItem value="all">Semua Status</SelectItem>
-                  <SelectItem value="BON">BON</SelectItem>
-                  <SelectItem value="RECEIVED">RECEIVED</SelectItem>
-                  <SelectItem value="KMP">KMP</SelectItem>
-                  <SelectItem value="CANCELED">CANCELED</SelectItem>
+                <SelectItem value="all">Semua Teknisi</SelectItem>
+                {users?.filter(u => u.role === 'Teknisi').map(user => (
+                  <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
+          )}
+
+          <Select value={filterStatus} onValueChange={(value) => { setFilterStatus(value === 'all' ? '' : value); setCurrentPage(1); }}>
+            <SelectTrigger className="w-[180px] bg-background">
+              <SelectValue placeholder="Filter Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Status</SelectItem>
+              <SelectItem value="BON">BON</SelectItem>
+              <SelectItem value="RECEIVED">RECEIVED</SelectItem>
+              <SelectItem value="KMP">KMP</SelectItem>
+              <SelectItem value="CANCELED">CANCELED</SelectItem>
+            </SelectContent>
+          </Select>
 
           {permissions?.dailybon_edit && (
             <Button onClick={() => setIsAddModalOpen(true)}>
@@ -543,7 +331,7 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
       </PageHeader>
 
       <div className="p-4 md:p-6">
-        <div className="border rounded-lg">
+        <div className="border rounded-lg bg-card shadow-sm">
           <Table>
             <TableHeader>
               <TableRow>
@@ -561,20 +349,20 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                 Array.from({ length: 5 }).map((_, index) => (
-                    <TableRow key={index}>
-                        <TableCell><div className="flex gap-2"><Skeleton className="h-8 w-8" /><Skeleton className="h-8 w-8" /></div></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
-                        <TableCell><Skeleton className="h-6 w-[80px] rounded-full" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
-                    </TableRow>
-                 ))
+                Array.from({ length: 5 }).map((_, index) => (
+                  <TableRow key={index}>
+                    <TableCell><div className="flex gap-2"><Skeleton className="h-8 w-8" /><Skeleton className="h-8 w-8" /></div></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                    <TableCell><Skeleton className="h-6 w-[80px] rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                  </TableRow>
+                ))
               ) : paginatedData.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={10} className="text-center h-24">
@@ -597,19 +385,19 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
               )))}
             </TableBody>
           </Table>
-           {!isLoading && paginatedData.length > 0 && (
-          <DataTablePagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={setCurrentPage}
-            canPreviousPage={currentPage > 1}
-            canNextPage={currentPage < totalPages}
-          />
+          {!isLoading && paginatedData.length > 0 && (
+            <DataTablePagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              canPreviousPage={currentPage > 1}
+              canNextPage={currentPage < totalPages}
+            />
           )}
         </div>
       </div>
 
-       <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
+      <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
@@ -638,9 +426,18 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
                 render={({ field }) => (
                   <FormItem className="md:col-span-1">
                     <FormLabel>Part</FormLabel>
-                    <FormControl>
-                      <Input placeholder="PN-001" {...field} />
-                    </FormControl>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih Part" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {inventory?.map(item => (
+                          <SelectItem key={item.id} value={item.part}>{item.part}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -652,7 +449,7 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
                   <FormItem className="md:col-span-1">
                     <FormLabel>Deskripsi</FormLabel>
                     <FormControl>
-                      <Input placeholder="Otomatis terisi" {...field} readOnly className="bg-muted"/>
+                      <Input placeholder="Otomatis terisi" {...field} readOnly className="bg-muted" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -678,30 +475,30 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
                   <FormItem>
                     <FormLabel>Harga</FormLabel>
                     <FormControl>
-                       <Input value={formatCurrency(field.value)} readOnly className="bg-muted"/>
+                      <Input value={formatCurrency(field.value)} readOnly className="bg-muted" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-               <FormField
+              <FormField
                 control={addForm.control}
                 name="status_bon"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Status</FormLabel>
                     <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                            <SelectTrigger>
-                                <SelectValue placeholder="Pilih Status" />
-                            </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                            <SelectItem value="BON">BON</SelectItem>
-                            <SelectItem value="RECEIVED">RECEIVED</SelectItem>
-                            <SelectItem value="KMP">KMP</SelectItem>
-                            <SelectItem value="CANCELED">CANCELED</SelectItem>
-                        </SelectContent>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih Status" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="BON">BON</SelectItem>
+                        <SelectItem value="RECEIVED">RECEIVED</SelectItem>
+                        <SelectItem value="KMP">KMP</SelectItem>
+                        <SelectItem value="CANCELED">CANCELED</SelectItem>
+                      </SelectContent>
                     </Select>
                     <FormMessage />
                   </FormItem>
@@ -713,10 +510,10 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Teknisi</FormLabel>
-                    <Select 
-                        onValueChange={field.onChange} 
-                        value={field.value}
-                        disabled={currentUser?.role === 'Teknisi'}
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                      disabled={authUser?.role === 'Teknisi'}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -725,7 +522,7 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
                       </FormControl>
                       <SelectContent>
                         {users?.filter(u => u.role === 'Teknisi').map(user => (
-                            <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
+                          <SelectItem key={user.id} value={user.nama_teknisi}>{user.nama_teknisi}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -759,117 +556,121 @@ async function onEditSubmit(values: z.infer<typeof editSchema>) {
 
       {selectedBon && (
         <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-            <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                    <DialogTitle>Update Status Bon</DialogTitle>
-                    <DialogDescription>Update status untuk part {selectedBon.part}.</DialogDescription>
-                </DialogHeader>
-                <Form {...editForm}>
-                    <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4 py-4">
-                        <FormField
-                            control={editForm.control}
-                            name="status_bon"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Status Bon</FormLabel>
-                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                        <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Pilih Status" />
-                                            </SelectTrigger>
-                                        </FormControl>
-                                        <SelectContent>
-                                            <SelectItem value="BON">BON</SelectItem>
-                                            <SelectItem value="RECEIVED">RECEIVED</SelectItem>
-                                            <SelectItem value="KMP">KMP</SelectItem>
-                                            <SelectItem value="CANCELED">CANCELED</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={editForm.control}
-                            name="no_tkl"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>No. TKL</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="TKL/JKT/25/11/23/001" {...field} value={field.value ?? ''}/>
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={editForm.control}
-                            name="keterangan"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Keterangan</FormLabel>
-                                    <FormControl>
-                                        <Textarea placeholder="Keterangan opsional..." {...field} value={field.value ?? ''} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <DialogFooter>
-                            <DialogClose asChild>
-                                <Button type="button" variant="secondary">Batal</Button>
-                            </DialogClose>
-                            <Button type="submit">Simpan Perubahan</Button>
-                        </DialogFooter>
-                    </form>
-                </Form>
-            </DialogContent>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Update Status Bon</DialogTitle>
+              <DialogDescription>Update status untuk part {selectedBon.part}.</DialogDescription>
+            </DialogHeader>
+            <Form {...editForm}>
+              <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4 py-4">
+                <FormField
+                  control={editForm.control}
+                  name="status_bon"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Status Bon</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Pilih Status" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="BON">BON</SelectItem>
+                          <SelectItem value="RECEIVED">RECEIVED</SelectItem>
+                          <SelectItem value="KMP">KMP</SelectItem>
+                          <SelectItem value="CANCELED">CANCELED</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="no_tkl"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>No. TKL</FormLabel>
+                      <FormControl>
+                        <Input placeholder="TKL/JKT/25/11/23/001" {...field} value={field.value ?? ''} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="keterangan"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Keterangan</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="Alasan perubahan atau memo tambahan..." {...field} value={field.value ?? ''} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button type="button" variant="secondary">Batal</Button>
+                  </DialogClose>
+                  <Button type="submit" disabled={editForm.formState.isSubmitting}>Simpan Perubahan</Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
         </Dialog>
       )}
 
       {selectedBon && (
         <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
-            <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                    <DialogTitle>Detail Bon: {selectedBon.part}</DialogTitle>
-                    <DialogDescription>Deskripsi: {selectedBon.deskripsi}</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-4 text-sm">
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Qty</span>
-                        <span>{selectedBon.qty_dailybon}</span>
-                    </div>
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Harga</span>
-                        <span>{formatCurrency(selectedBon.harga)}</span>
-                    </div>
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Status</span>
-                        <Badge variant={statusVariant[selectedBon.status_bon] || 'default'}>{selectedBon.status_bon}</Badge>
-                    </div>
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Teknisi</span>
-                        <span>{selectedBon.teknisi}</span>
-                    </div>
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Tanggal</span>
-                        <span>{selectedBon.tanggal_dailybon}</span>
-                    </div>
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">No. TKL</span>
-                        <span>{selectedBon.no_tkl || "-"}</span>
-                    </div>
-                     <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Keterangan</span>
-                        <span>{selectedBon.keterangan || "-"}</span>
-                    </div>
-                </div>
-                <DialogFooter>
-                    <DialogClose asChild>
-                        <Button variant="secondary">Tutup</Button>
-                    </DialogClose>
-                </DialogFooter>
-            </DialogContent>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Detail Daily Bon: {selectedBon.part}</DialogTitle>
+              <DialogDescription>{selectedBon.deskripsi}</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4 text-sm">
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Qty</span>
+                <span>{selectedBon.qty_dailybon}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Harga</span>
+                <span>{formatCurrency(selectedBon.harga)}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Total</span>
+                <span className="font-semibold">{formatCurrency(selectedBon.qty_dailybon * selectedBon.harga)}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Status</span>
+                <Badge variant={statusVariant[selectedBon.status_bon] || 'default'}>{selectedBon.status_bon}</Badge>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Teknisi</span>
+                <span>{selectedBon.teknisi}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Tanggal</span>
+                <span>{selectedBon.tanggal_dailybon}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">No. TKL</span>
+                <span>{selectedBon.no_tkl || "-"}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Keterangan</span>
+                <span>{selectedBon.keterangan || "-"}</span>
+              </div>
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="secondary">Tutup</Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
       )}
     </>

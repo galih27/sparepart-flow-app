@@ -24,34 +24,28 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { useUser, useDoc, useFirestore } from "@/firebase";
-import { doc } from "firebase/firestore";
+import { useCurrentUser } from "@/hooks/use-api";
 import type { User } from "@/lib/definitions";
 import { Skeleton } from "../ui/skeleton";
-import { getAuth, signOut } from "firebase/auth";
 
 function HeaderContent() {
   const router = useRouter();
-  const { user: authUser, isLoading: isLoadingUser } = useUser();
-  const firestore = useFirestore();
-
-  const userDocRef = useMemo(() => {
-    if (!firestore || !authUser?.uid) return null;
-    return doc(firestore, 'users', authUser.uid);
-  }, [firestore, authUser]);
-
-  const { data: currentUser, isLoading: isLoadingRole } = useDoc<User>(userDocRef);
+  const { user: currentUser, isLoading } = useCurrentUser();
 
   const handleLogout = async () => {
-    const auth = getAuth();
-    await signOut(auth);
-    // Hapus cookie saat logout
-    document.cookie = 'firebaseIdToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-    router.push("/login");
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push("/login");
+      router.refresh();
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Fallback redirect
+      router.push("/login");
+    }
   };
 
-  const isLoading = isLoadingUser || isLoadingRole;
-  
+  // isLoading already defined from useCurrentUser
+
   const getInitials = (name: string) => {
     if (!name) return '';
     return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
@@ -61,7 +55,7 @@ function HeaderContent() {
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6">
       <div className="flex items-center gap-2">
         <SidebarTrigger />
-        <Link href="/" className="flex items-center gap-2 font-semibold text-lg md:text-xl font-headline">
+        <Link href="/dashboard" className="flex items-center gap-2 font-semibold text-lg md:text-xl font-headline">
           <Shield className="h-6 w-6 text-primary" />
           <span className="hidden sm:inline">Athena</span>
         </Link>
@@ -79,7 +73,7 @@ function HeaderContent() {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="relative h-9 w-9 rounded-full">
             <Avatar className="h-9 w-9">
-              <AvatarImage src={currentUser?.photo} alt={currentUser?.nama_teknisi} />
+              <AvatarImage src={currentUser?.photo || undefined} alt={currentUser?.nama_teknisi} />
               <AvatarFallback>
                 {isLoading ? (
                   <Skeleton className="h-9 w-9 rounded-full" />
@@ -94,19 +88,19 @@ function HeaderContent() {
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-56" align="end" forceMount>
           <DropdownMenuLabel className="font-normal">
-             {isLoading ? (
-                <div className="flex flex-col space-y-2">
-                  <Skeleton className="h-4 w-[150px]" />
-                  <Skeleton className="h-3 w-[100px]" />
-                </div>
-              ) : (
-                <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">{currentUser?.nama_teknisi || 'Pengguna'}</p>
-                  <p className="text-xs leading-none text-muted-foreground">
-                    {currentUser?.email || 'Tidak ada email'}
-                  </p>
-                </div>
-              )}
+            {isLoading ? (
+              <div className="flex flex-col space-y-2">
+                <Skeleton className="h-4 w-[150px]" />
+                <Skeleton className="h-3 w-[100px]" />
+              </div>
+            ) : (
+              <div className="flex flex-col space-y-1">
+                <p className="text-sm font-medium leading-none">{currentUser?.nama_teknisi || 'Pengguna'}</p>
+                <p className="text-xs leading-none text-muted-foreground">
+                  {currentUser?.email || 'Tidak ada email'}
+                </p>
+              </div>
+            )}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => router.push('/profile')}>

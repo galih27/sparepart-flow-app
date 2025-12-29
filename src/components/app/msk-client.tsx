@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
@@ -6,12 +5,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import * as z from "zod";
 import { Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
-import type { Msk, InventoryItem, User } from '@/lib/definitions';
+import type { Msk, InventoryItem, User, Permissions } from '@/lib/definitions';
 import { useToast } from "@/hooks/use-toast";
-import { useCollection, useFirestore, useUser, useDoc } from '@/firebase';
-import { collection, doc, addDoc, updateDoc, deleteDoc, runTransaction, query, where, getDocs } from 'firebase/firestore';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError, type SecurityRuleContext } from '@/firebase/errors';
+import { useAPIFetch, useCurrentUser, api } from '@/hooks/use-api';
 
 import PageHeader from '@/components/app/page-header';
 import { Button } from '@/components/ui/button';
@@ -67,7 +63,7 @@ const formSchema = z.object({
   part: z.string().min(1, "Part wajib diisi"),
   deskripsi: z.string(),
   qty_msk: z.coerce.number().min(1, "Kuantitas harus lebih dari 0"),
-  harga: z.number(),
+  harga: z.coerce.number(),
   site_msk: z.string().min(1, "Site/asal wajib diisi"),
   no_transaksi: z.string().min(1, "No Transaksi wajib diisi"),
   status_msk: z.enum(["BON", "RECEIVED", "CANCELED"]),
@@ -78,21 +74,10 @@ const ITEMS_PER_PAGE = 10;
 
 export default function MskClient() {
   const { toast } = useToast();
-  const firestore = useFirestore();
-  const { user: authUser, isLoading: isLoadingAuth } = useUser();
+  const { user: authUser, isLoading: isLoadingAuth } = useCurrentUser();
 
-  const userDocRef = useMemo(() => {
-    if (!firestore || !authUser?.uid) return null;
-    return doc(firestore, 'users', authUser.uid);
-  }, [firestore, authUser]);
-
-  const { data: currentUser, isLoading: isLoadingUser } = useDoc<User>(userDocRef);
-
-  const mskQuery = useMemo(() => firestore ? collection(firestore, 'msk') : null, [firestore]);
-  const inventoryQuery = useMemo(() => firestore ? collection(firestore, 'inventory') : null, [firestore]);
-  
-  const { data, isLoading: isLoadingData } = useCollection<Msk>(mskQuery);
-  const { data: inventory, isLoading: isLoadingInventory } = useCollection<InventoryItem>(inventoryQuery);
+  const { data, isLoading: isLoadingData, refetch } = useAPIFetch<Msk>('/api/msk');
+  const { data: inventory, isLoading: isLoadingInventory } = useAPIFetch<InventoryItem>('/api/inventory');
 
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -115,22 +100,35 @@ export default function MskClient() {
       keterangan: "",
     },
   });
-  
+
   const watchedPart = useWatch({ control: form.control, name: "part" });
 
   useEffect(() => {
-    if (inventory) {
+    if (inventory && watchedPart) {
       const inventoryItem = inventory.find(item => item.part.toLowerCase() === watchedPart.toLowerCase());
       if (inventoryItem) {
         form.setValue("deskripsi", inventoryItem.deskripsi);
         form.setValue("harga", inventoryItem.total_harga);
-      } else {
+      } else if (!isEditModalOpen) {
         form.setValue("deskripsi", "");
         form.setValue("harga", 0);
       }
     }
-  }, [watchedPart, inventory, form]);
+  }, [watchedPart, inventory, form, isEditModalOpen]);
 
+  const parsePermissions = (perms: any): Permissions | null => {
+    if (!perms) return null;
+    if (typeof perms === 'string') {
+      try {
+        return JSON.parse(perms);
+      } catch (e) {
+        return null;
+      }
+    }
+    return perms;
+  };
+
+  const permissions = useMemo(() => parsePermissions(authUser?.permissions), [authUser]);
 
   const filteredData = useMemo(() => {
     if (!data) return [];
@@ -146,28 +144,28 @@ export default function MskClient() {
     const end = start + ITEMS_PER_PAGE;
     return filteredData.slice(start, end);
   }, [filteredData, currentPage]);
-  
+
   const handleView = (msk: Msk) => {
     setSelectedMsk(msk);
     setIsViewModalOpen(true);
   };
-  
+
   const handleEdit = (msk: Msk) => {
     if (permissions?.msk_edit) {
-        setSelectedMsk(msk);
-        form.reset({
-            part: msk.part,
-            deskripsi: msk.deskripsi,
-            qty_msk: msk.qty_msk,
-            harga: inventory?.find(i => i.part === msk.part)?.total_harga || 0,
-            site_msk: msk.site_msk,
-            no_transaksi: msk.no_transaksi,
-            status_msk: msk.status_msk,
-            keterangan: msk.keterangan || '',
-        });
-        setIsEditModalOpen(true);
+      setSelectedMsk(msk);
+      form.reset({
+        part: msk.part,
+        deskripsi: msk.deskripsi,
+        qty_msk: msk.qty_msk,
+        harga: inventory?.find(i => i.part === msk.part)?.total_harga || 0,
+        site_msk: msk.site_msk,
+        no_transaksi: msk.no_transaksi,
+        status_msk: msk.status_msk,
+        keterangan: msk.keterangan || '',
+      });
+      setIsEditModalOpen(true);
     } else {
-         toast({ variant: 'destructive', title: 'Akses Ditolak', description: 'Anda tidak memiliki izin untuk mengedit data ini.' });
+      toast({ variant: 'destructive', title: 'Akses Ditolak', description: 'Anda tidak memiliki izin untuk mengedit data ini.' });
     }
   };
 
@@ -176,215 +174,64 @@ export default function MskClient() {
       setSelectedMsk(msk);
       setIsDeleting(true);
     } else {
-       toast({ variant: 'destructive', title: 'Akses Ditolak', description: 'Anda tidak memiliki izin untuk menghapus data ini.' });
+      toast({ variant: 'destructive', title: 'Akses Ditolak', description: 'Anda tidak memiliki izin untuk menghapus data ini.' });
     }
   };
-
-  const handleReverseStock = async (msk: Msk) => {
-    if (!firestore || !msk.stock_updated || msk.status_msk !== 'RECEIVED') return;
-
-    const inventoryCol = collection(firestore, 'inventory');
-    const q = query(inventoryCol, where("part", "==", msk.part));
-
-    try {
-        const inventorySnapshot = await getDocs(q);
-        if (inventorySnapshot.empty) {
-            throw new Error(`Part ${msk.part} tidak ditemukan di inventaris untuk di-rollback.`);
-        }
-        const inventoryRef = inventorySnapshot.docs[0].ref;
-
-        await runTransaction(firestore, async (transaction) => {
-            const inventoryDoc = await transaction.get(inventoryRef);
-            if (!inventoryDoc.exists()) {
-                throw new Error("Dokumen inventaris tidak ditemukan saat transaksi rollback.");
-            }
-
-            const currentInventory = inventoryDoc.data() as InventoryItem;
-            // Rollback the addition, so we subtract from the stock
-            const newQtyBaik = currentInventory.qty_baik - msk.qty_msk;
-            const newAvailableQty = currentInventory.available_qty - msk.qty_msk;
-
-            if (newQtyBaik < 0 || newAvailableQty < 0) {
-              console.warn(`Rollback untuk part ${msk.part} akan menghasilkan stok negatif. Proses tetap dilanjutkan.`);
-            }
-
-            transaction.update(inventoryRef, { 
-                qty_baik: newQtyBaik, 
-                available_qty: newAvailableQty 
-            });
-        });
-
-        toast({ title: "Rollback Sukses", description: `Stok untuk part ${msk.part} berhasil dikembalikan.` });
-    } catch (error: any) {
-        console.error("Gagal melakukan rollback stok:", error);
-        toast({
-            variant: "destructive",
-            title: "Gagal Rollback Stok",
-            description: `Gagal mengembalikan stok untuk part ${msk.part}. Mohon periksa manual. Error: ${error.message}`,
-        });
-    }
-};
-
 
   const confirmDelete = async () => {
-    if (!selectedMsk || !selectedMsk.id || !firestore) return;
+    if (!selectedMsk || !selectedMsk.id) return;
 
-    if (selectedMsk.stock_updated && selectedMsk.status_msk === 'RECEIVED') {
-      await handleReverseStock(selectedMsk);
+    const result = await api.delete(`/api/msk/${selectedMsk.id}`);
+
+    if (result.error) {
+      toast({ variant: "destructive", title: "Error", description: result.error.message });
+    } else {
+      toast({ title: "Sukses", description: "Data MSK telah dihapus." });
+      await refetch();
     }
-    
-    const mskRef = doc(firestore, 'msk', selectedMsk.id);
-    
-    deleteDoc(mskRef)
-      .then(() => {
-        toast({ title: "Sukses", description: "Data MSK telah dihapus." });
-      })
-      .catch(async (serverError) => {
-        const permissionError = new FirestorePermissionError({
-          path: mskRef.path,
-          operation: 'delete',
-        } satisfies SecurityRuleContext);
-        errorEmitter.emit('permission-error', permissionError);
-      })
-      .finally(() => {
-        setIsDeleting(false);
-        setSelectedMsk(null);
-      });
+
+    setIsDeleting(false);
+    setSelectedMsk(null);
   };
-  
+
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    if (!firestore) return;
-
     const isEditing = !!selectedMsk?.id;
-    let mskToSave: Partial<Msk> = { ...values };
 
-    // Prevent saving if form is invalid
-    const validation = formSchema.safeParse(values);
-    if (!validation.success) {
-      toast({ variant: 'destructive', title: 'Gagal', description: 'Form tidak valid.' });
-      return;
-    }
-
-    // Logic for ADDING a new item
     if (!isEditing) {
-      const newMskData: Omit<Msk, 'id'> = {
+      const newMskData = {
         ...values,
         tanggal_msk: new Date().toISOString().split('T')[0],
-        stock_updated: false,
       };
 
-      try {
-        await runTransaction(firestore, async (transaction) => {
-          const inventoryCol = collection(firestore, 'inventory');
-          const q = query(inventoryCol, where("part", "==", values.part));
-          const inventorySnapshot = await getDocs(q);
-          const mskDocRef = doc(collection(firestore, 'msk'));
-          
-          let stockUpdatedFlag = false;
-          if (values.status_msk === 'RECEIVED') {
-            if (inventorySnapshot.empty) {
-              throw new Error(`Part ${values.part} tidak ada di Report Stock. Tidak dapat menerima barang.`);
-            }
-            const inventoryRef = inventorySnapshot.docs[0].ref;
-            const inventoryDoc = await transaction.get(inventoryRef);
-            if (!inventoryDoc.exists()) throw new Error("Dokumen inventaris tidak ditemukan.");
-            
-            const currentInventory = inventoryDoc.data() as InventoryItem;
-            transaction.update(inventoryRef, {
-              qty_baik: currentInventory.qty_baik + values.qty_msk,
-              available_qty: currentInventory.available_qty + values.qty_msk,
-            });
-            stockUpdatedFlag = true;
-          }
-          
-          transaction.set(mskDocRef, { ...newMskData, stock_updated: stockUpdatedFlag });
-        });
-        
-        toast({ title: "Sukses", description: "Data MSK berhasil ditambahkan dan stok disesuaikan." });
+      const result = await api.post('/api/msk', newMskData);
+
+      if (result.error) {
+        toast({ variant: 'destructive', title: 'Gagal', description: result.error.message });
+      } else {
+        toast({ title: "Sukses", description: "Data MSK berhasil ditambahkan." });
         setIsAddModalOpen(false);
         form.reset();
-      } catch (error: any) {
-        console.error("Gagal menambah MSK:", error);
-        toast({ variant: 'destructive', title: 'Gagal', description: error.message });
-        const permissionError = new FirestorePermissionError({
-          path: 'msk',
-          operation: 'create',
-          requestResourceData: newMskData,
-        } satisfies SecurityRuleContext);
-        errorEmitter.emit('permission-error', permissionError);
+        await refetch();
       }
-      return;
-    }
+    } else if (selectedMsk) {
+      const result = await api.put(`/api/msk/${selectedMsk.id}`, values);
 
-    // Logic for EDITING an existing item
-    if (isEditing && selectedMsk) {
-        try {
-            await runTransaction(firestore, async (transaction) => {
-                const mskRef = doc(firestore, 'msk', selectedMsk.id);
-                const inventoryCol = collection(firestore, 'inventory');
-                const q = query(inventoryCol, where("part", "==", selectedMsk.part));
-                const inventorySnapshot = await getDocs(q);
-                
-                if (inventorySnapshot.empty) {
-                    throw new Error(`Part ${selectedMsk.part} tidak ditemukan di inventaris.`);
-                }
-                
-                const inventoryRef = inventorySnapshot.docs[0].ref;
-                const inventoryDoc = await transaction.get(inventoryRef);
-                if (!inventoryDoc.exists()) throw new Error("Dokumen inventaris tidak ditemukan.");
-                
-                const currentInventory = inventoryDoc.data() as InventoryItem;
-
-                const oldStatus = selectedMsk.status_msk;
-                const newStatus = values.status_msk;
-                const oldStockUpdated = selectedMsk.stock_updated;
-                let newStockUpdated = oldStockUpdated;
-
-                // Scenario: Status changed FROM RECEIVED to something else (Rollback)
-                if (oldStockUpdated && oldStatus === 'RECEIVED' && newStatus !== 'RECEIVED') {
-                    transaction.update(inventoryRef, {
-                        qty_baik: currentInventory.qty_baik - selectedMsk.qty_msk,
-                        available_qty: currentInventory.available_qty - selectedMsk.qty_msk,
-                    });
-                    newStockUpdated = false;
-                }
-                
-                // Scenario: Status changed TO RECEIVED from something else (Apply stock)
-                else if (!oldStockUpdated && newStatus === 'RECEIVED') {
-                    transaction.update(inventoryRef, {
-                        qty_baik: currentInventory.qty_baik + values.qty_msk,
-                        available_qty: currentInventory.available_qty + values.qty_msk,
-                    });
-                    newStockUpdated = true;
-                }
-
-                transaction.update(mskRef, {
-                  ...values,
-                  stock_updated: newStockUpdated
-                });
-            });
-
-            toast({ title: "Sukses", description: "Data MSK berhasil diperbarui." });
-            setIsEditModalOpen(false);
-            setSelectedMsk(null);
-            form.reset();
-
-        } catch (error: any) {
-            console.error("Gagal update MSK:", error);
-            toast({ variant: "destructive", title: "Gagal Update", description: error.message });
-            const permissionError = new FirestorePermissionError({
-              path: `msk/${selectedMsk.id}`,
-              operation: 'update',
-              requestResourceData: values,
-            } satisfies SecurityRuleContext);
-            errorEmitter.emit('permission-error', permissionError);
-        }
+      if (result.error) {
+        toast({ variant: "destructive", title: "Gagal Update", description: result.error.message });
+      } else {
+        toast({ title: "Sukses", description: "Data MSK berhasil diperbarui." });
+        setIsEditModalOpen(false);
+        setSelectedMsk(null);
+        form.reset();
+        await refetch();
+      }
     }
   }
-  
-  const formatCurrency = (value: number) => {
-    if (isNaN(value)) return 'Rp 0';
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
+
+  const formatCurrency = (value: number | string) => {
+    const num = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(num)) return 'Rp 0';
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
   }
 
   const statusVariant = {
@@ -393,29 +240,25 @@ export default function MskClient() {
     'CANCELED': 'destructive'
   } as const;
 
-  const isLoading = isLoadingData || isLoadingInventory || isLoadingAuth || isLoadingUser;
-  const permissions = currentUser?.permissions;
+  const isLoading = isLoadingData || isLoadingInventory || isLoadingAuth;
 
   const renderActionCell = (item: Msk) => {
-    const canEdit = permissions?.msk_edit;
-    const canDelete = permissions?.msk_delete;
-
     return (
-        <div className="flex items-center gap-0">
-            <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
-                <Eye className="h-4 w-4" />
-            </Button>
-            {canEdit && (
-                 <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
-                    <Pencil className="h-4 w-4" />
-                </Button>
-            )}
-            {canDelete && (
-                 <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
-                    <Trash2 className="h-4 w-4" />
-                </Button>
-            )}
-        </div>
+      <div className="flex items-center gap-0">
+        <Button variant="ghost" size="icon" onClick={() => handleView(item)}>
+          <Eye className="h-4 w-4" />
+        </Button>
+        {permissions?.msk_edit && (
+          <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+        )}
+        {permissions?.msk_delete && (
+          <Button variant="ghost" size="icon" onClick={() => handleDelete(item)} className="text-destructive hover:text-destructive">
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
     );
   };
 
@@ -423,48 +266,61 @@ export default function MskClient() {
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
         <FormField control={form.control} name="part" render={({ field }) => (
-            <FormItem><FormLabel>Part</FormLabel><FormControl><Input placeholder="PN-001" {...field} disabled={isEdit} /></FormControl><FormMessage /></FormItem>
-        )}/>
+          <FormItem><FormLabel>Part</FormLabel>
+            <Select onValueChange={field.onChange} value={field.value} disabled={isEdit}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih Part" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                {inventory?.map(item => (
+                  <SelectItem key={item.id} value={item.part}>{item.part}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage /></FormItem>
+        )} />
         <FormField control={form.control} name="deskripsi" render={({ field }) => (
-            <FormItem><FormLabel>Deskripsi</FormLabel><FormControl><Input placeholder="Otomatis terisi" {...field} readOnly className="bg-muted" /></FormControl><FormMessage /></FormItem>
-        )}/>
+          <FormItem><FormLabel>Deskripsi</FormLabel><FormControl><Input placeholder="Otomatis terisi" {...field} readOnly className="bg-muted" /></FormControl><FormMessage /></FormItem>
+        )} />
         <FormField control={form.control} name="qty_msk" render={({ field }) => (
-            <FormItem><FormLabel>Qty</FormLabel><FormControl><Input type="number" {...field} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'} /></FormControl><FormMessage /></FormItem>
-        )}/>
+          <FormItem><FormLabel>Qty</FormLabel><FormControl><Input type="number" {...field} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'} /></FormControl><FormMessage /></FormItem>
+        )} />
         <FormField control={form.control} name="harga" render={({ field }) => (
-            <FormItem><FormLabel>Harga</FormLabel><FormControl><Input value={formatCurrency(field.value)} readOnly className="bg-muted"/></FormControl><FormMessage /></FormItem>
-        )}/>
+          <FormItem><FormLabel>Harga</FormLabel><FormControl><Input value={formatCurrency(field.value)} readOnly className="bg-muted" /></FormControl><FormMessage /></FormItem>
+        )} />
         <FormField
-            control={form.control}
-            name="status_msk"
-            render={({ field }) => (
-                <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'}>
-                        <FormControl>
-                            <SelectTrigger>
-                                <SelectValue placeholder="Pilih Status" />
-                            </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                            <SelectItem value="BON">BON</SelectItem>
-                            <SelectItem value="RECEIVED">RECEIVED</SelectItem>
-                            <SelectItem value="CANCELED">CANCELED</SelectItem>
-                        </SelectContent>
-                    </Select>
-                    <FormMessage />
-                </FormItem>
-            )}
+          control={form.control}
+          name="status_msk"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Status</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih Status" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="BON">BON</SelectItem>
+                  <SelectItem value="RECEIVED">RECEIVED</SelectItem>
+                  <SelectItem value="CANCELED">CANCELED</SelectItem>
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
         />
         <FormField control={form.control} name="site_msk" render={({ field }) => (
-            <FormItem><FormLabel>Asal Site/Cabang</FormLabel><FormControl><Input placeholder="Kantor Pusat" {...field} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'} /></FormControl><FormMessage /></FormItem>
-        )}/>
+          <FormItem><FormLabel>Asal Site/Cabang</FormLabel><FormControl><Input placeholder="Kantor Pusat" {...field} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'} /></FormControl><FormMessage /></FormItem>
+        )} />
         <FormField control={form.control} name="no_transaksi" render={({ field }) => (
-            <FormItem className="md:col-span-2"><FormLabel>No. Transaksi</FormLabel><FormControl><Input placeholder="TRX-MSK-..." {...field} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'} /></FormControl><FormMessage /></FormItem>
-        )}/>
+          <FormItem className="md:col-span-2"><FormLabel>No. Transaksi</FormLabel><FormControl><Input placeholder="TRX-MSK-..." {...field} disabled={isEdit && selectedMsk?.status_msk === 'RECEIVED'} /></FormControl><FormMessage /></FormItem>
+        )} />
         <FormField control={form.control} name="keterangan" render={({ field }) => (
-            <FormItem className="md:col-span-2"><FormLabel>Keterangan</FormLabel><FormControl><Textarea placeholder="Keterangan opsional..." {...field} /></FormControl><FormMessage /></FormItem>
-        )}/>
+          <FormItem className="md:col-span-2"><FormLabel>Keterangan</FormLabel><FormControl><Textarea placeholder="Keterangan opsional..." {...field} /></FormControl><FormMessage /></FormItem>
+        )} />
         <DialogFooter className="md:col-span-2">
           <DialogClose asChild><Button type="button" variant="secondary">Batal</Button></DialogClose>
           <Button type="submit" disabled={form.formState.isSubmitting || (isEdit && selectedMsk?.status_msk === 'RECEIVED')}>{isEdit ? "Simpan Perubahan" : "Simpan"}</Button>
@@ -477,19 +333,19 @@ export default function MskClient() {
     <>
       <PageHeader title="Material Service Kiriman (MSK)">
         <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Cari no transaksi atau part..."
-                className="w-full rounded-lg bg-background pl-8 sm:w-[250px]"
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-              />
-            </div>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="Cari no transaksi atau part..."
+              className="w-full rounded-lg bg-background pl-8 sm:w-[250px]"
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+          </div>
           {permissions?.msk_edit && (
             <Button onClick={() => {
               form.reset({
@@ -501,18 +357,18 @@ export default function MskClient() {
                 no_transaksi: `TRX-MSK-${Date.now()}`,
                 status_msk: "BON",
                 keterangan: "",
-              }); 
+              });
               setSelectedMsk(null);
               setIsAddModalOpen(true);
             }}>
-                <Plus className="mr-2 h-4 w-4" /> Tambah
+              <Plus className="mr-2 h-4 w-4" /> Tambah
             </Button>
           )}
         </div>
       </PageHeader>
 
       <div className="p-4 md:p-6">
-        <div className="border rounded-lg">
+        <div className="border rounded-lg bg-card text-card-foreground shadow-sm">
           <Table>
             <TableHeader>
               <TableRow>
@@ -528,20 +384,20 @@ export default function MskClient() {
               </TableRow>
             </TableHeader>
             <TableBody>
-            {isLoading ? (
-                 Array.from({ length: 5 }).map((_, index) => (
-                    <TableRow key={index}>
-                        <TableCell><div className="flex gap-2"><Skeleton className="h-8 w-8" /><Skeleton className="h-8 w-8" /></div></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
-                        <TableCell><Skeleton className="h-6 w-[80px] rounded-full" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
-                    </TableRow>
-                 ))
+              {isLoading ? (
+                Array.from({ length: 5 }).map((_, index) => (
+                  <TableRow key={index}>
+                    <TableCell><div className="flex gap-2"><Skeleton className="h-8 w-8" /><Skeleton className="h-8 w-8" /></div></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[50px]" /></TableCell>
+                    <TableCell><Skeleton className="h-6 w-[80px] rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[120px]" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+                  </TableRow>
+                ))
               ) : paginatedData.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={9} className="text-center h-24">
@@ -574,8 +430,8 @@ export default function MskClient() {
           )}
         </div>
       </div>
-      
-       <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
+
+      <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
@@ -599,7 +455,7 @@ export default function MskClient() {
           {renderForm(false)}
         </DialogContent>
       </Dialog>
-      
+
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
@@ -612,47 +468,45 @@ export default function MskClient() {
 
       {selectedMsk && (
         <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
-            <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                    <DialogTitle>Detail MSK: {selectedMsk.part}</DialogTitle>
-                    <DialogDescription>Deskripsi: {selectedMsk.deskripsi}</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-4 text-sm">
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Qty</span>
-                        <span>{selectedMsk.qty_msk}</span>
-                    </div>
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Status</span>
-                        <Badge variant={statusVariant[selectedMsk.status_msk] || 'default'}>{selectedMsk.status_msk}</Badge>
-                    </div>
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Asal Site</span>
-                        <span>{selectedMsk.site_msk}</span>
-                    </div>
-                    <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Tanggal</span>
-                        <span>{selectedMsk.tanggal_msk}</span>
-                    </div>
-                     <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">No. Transaksi</span>
-                        <span>{selectedMsk.no_transaksi}</span>
-                    </div>
-                     <div className="grid grid-cols-[120px_1fr] items-center gap-4">
-                        <span className="text-muted-foreground">Keterangan</span>
-                        <span>{selectedMsk.keterangan || "-"}</span>
-                    </div>
-                </div>
-                <DialogFooter>
-                    <DialogClose asChild>
-                        <Button variant="secondary">Tutup</Button>
-                    </DialogClose>
-                </DialogFooter>
-            </DialogContent>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Detail MSK: {selectedMsk.part}</DialogTitle>
+              <DialogDescription>Deskripsi: {selectedMsk.deskripsi}</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4 text-sm">
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Qty</span>
+                <span>{selectedMsk.qty_msk}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Status</span>
+                <Badge variant={statusVariant[selectedMsk.status_msk] || 'default'}>{selectedMsk.status_msk}</Badge>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Asal Site</span>
+                <span>{selectedMsk.site_msk}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Tanggal</span>
+                <span>{selectedMsk.tanggal_msk}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">No. Transaksi</span>
+                <span>{selectedMsk.no_transaksi}</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                <span className="text-muted-foreground">Keterangan</span>
+                <span>{selectedMsk.keterangan || "-"}</span>
+              </div>
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="secondary">Tutup</Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
       )}
     </>
   );
 }
-
-    

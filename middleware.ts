@@ -1,34 +1,25 @@
-
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// This function can be marked `async` if using `await` inside
 export function middleware(request: NextRequest) {
-  // Nama cookie ini mungkin perlu Anda sesuaikan.
-  // Di aplikasi Firebase, cookie sesi sering kali memiliki nama seperti `__session` atau
-  // yang Anda atur secara kustom. Untuk tujuan pengembangan dengan Auth client-side,
-  // kita akan mencari cookie yang menandakan adanya token.
-  // Di sini, kita akan berasumsi ada cookie bernama 'firebaseIdToken' yang disimpan setelah login.
-  const hasToken = request.cookies.has('firebaseIdToken');
-  const isLoginPage = request.nextUrl.pathname.startsWith('/login');
+  const session = request.cookies.get('session')?.value;
+  const { pathname } = request.nextUrl;
+  const isLoginPage = pathname === '/login' || pathname === '/';
+  const isRegisterPage = pathname === '/register';
 
-  // Jika tidak ada token dan pengguna tidak berada di halaman login,
-  // alihkan ke halaman login.
-  if (!hasToken && !isLoginPage) {
-    return NextResponse.redirect(new URL('/login', request.url));
-  }
-
-  // Jika ada token dan pengguna mencoba mengakses halaman login,
-  // alihkan ke halaman utama.
-  if (hasToken && isLoginPage) {
+  // If there is no session and the user is not on login or register page, redirect to root (which is login)
+  if (!session && !isLoginPage && !isRegisterPage) {
     return NextResponse.redirect(new URL('/', request.url));
   }
-  
-  // Jika tidak ada kondisi di atas yang terpenuhi, lanjutkan seperti biasa.
+
+  // If there is a session and the user is on login or register page, redirect to dashboard
+  if (session && (isLoginPage || isRegisterPage)) {
+    return NextResponse.redirect(new URL('/dashboard', request.url));
+  }
+
   return NextResponse.next();
 }
 
-// See "Matching Paths" below to learn more
 export const config = {
   matcher: [
     /*
@@ -37,7 +28,8 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * - public folder
      */
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico|images|icons).*)',
   ],
 };

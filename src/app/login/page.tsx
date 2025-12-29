@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,12 +17,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/firebase";
-import { signInWithEmailAndPassword } from "firebase/auth";
 
 export default function LoginPage() {
   const router = useRouter();
-  const auth = useAuth();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,35 +29,32 @@ export default function LoginPage() {
     e.preventDefault();
     setIsLoading(true);
 
-    if (!auth) {
-      toast({
-        variant: "destructive",
-        title: "Login Gagal",
-        description: "Layanan otentikasi tidak tersedia.",
-      });
-      setIsLoading(false);
-      return;
-    }
-
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      
-      // Simpan token di cookie untuk digunakan oleh middleware
-      const idToken = await user.getIdToken();
-      document.cookie = `firebaseIdToken=${idToken}; path=/; max-age=3600`; // max-age=1 jam
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Login failed');
+      }
 
       toast({
         title: "Login Berhasil",
         description: `Selamat datang kembali!`,
       });
-      router.push(`/`);
+
+      router.push(`/dashboard`);
+      router.refresh();
 
     } catch (error: any) {
-       toast({
+      toast({
         variant: "destructive",
         title: "Login Gagal",
-        description: "Email atau password salah. Silakan coba lagi.",
+        description: error.message || "Email atau password salah. Silakan coba lagi.",
       });
       setIsLoading(false);
     }
@@ -107,10 +102,16 @@ export default function LoginPage() {
                 />
               </div>
             </CardContent>
-            <CardFooter>
+            <CardFooter className="flex flex-col space-y-4">
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? "Memuat..." : "Login"}
               </Button>
+              <div className="text-center text-sm text-muted-foreground font-headline mt-2">
+                Belum punya akun?{" "}
+                <Link href="/register" className="text-primary hover:underline font-bold">
+                  Daftar di sini
+                </Link>
+              </div>
             </CardFooter>
           </Card>
         </form>
