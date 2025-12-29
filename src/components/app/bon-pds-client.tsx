@@ -198,7 +198,7 @@ export default function BonPdsClient() {
   async function onAddSubmit(values: z.infer<typeof addSchema>) {
     const result = await api.post('/api/bon-pds', {
       ...values,
-      no_transaksi: `TRX-PDS-${Date.now()}`,
+      no_transaksi: `TKS${Date.now()}`,
     });
 
     if (result.error) {
